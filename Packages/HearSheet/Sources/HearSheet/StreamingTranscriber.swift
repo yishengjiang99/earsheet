@@ -17,6 +17,8 @@ import Foundation
 /// called from anywhere.
 public final class StreamingTranscriber: @unchecked Sendable {
     private let model: BasicPitchModel
+    /// The loaded model's own decoder thresholds.
+    private let thresholds: BasicPitchDecoder.Thresholds
     private let lock = NSLock()
     private var padded: [Float] = []
     private var noteFrames: [[Float]] = []
@@ -27,6 +29,7 @@ public final class StreamingTranscriber: @unchecked Sendable {
 
     public init(model: BasicPitchModel) {
         self.model = model
+        self.thresholds = model.thresholds
         padded = [Float](repeating: 0, count: Transcriber.frontPadSamples)
     }
 
@@ -146,7 +149,8 @@ public final class StreamingTranscriber: @unchecked Sendable {
     }
 
     private func decode(frames: ([[Float]], [[Float]], [[Float]])) -> [NoteEvent] {
-        let raw = BasicPitchDecoder.decode(frames: frames.0, onset: frames.1, contour: frames.2)
+        let raw = BasicPitchDecoder.decode(frames: frames.0, onset: frames.1, contour: frames.2,
+                                           thresholds: thresholds)
         return raw.map { r in
             NoteEvent(
                 onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),

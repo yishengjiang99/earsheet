@@ -31,7 +31,8 @@ final class HearSheetTests: XCTestCase {
             onset[19][f] = 0.2
             onset[21][f] = 0.2
         }
-        let decoded = BasicPitchDecoder.decode(frames: note, onset: onset, contour: contour)
+        let decoded = BasicPitchDecoder.decode(frames: note, onset: onset, contour: contour,
+                                               thresholds: .basicPitchDefaults)
         XCTAssertEqual(decoded.count, 3, "expected exactly the C major triad")
         XCTAssertEqual(decoded.map(\.midi).sorted(), midis)
         for d in decoded {

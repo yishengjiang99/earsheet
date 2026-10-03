@@ -7,9 +7,9 @@
 > (Spotify's defaults: 0.5 / 0.3 / 11). They ship as the thresholds sidecar
 > **`decoder-thresholds.json`** in release
 > [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest)
-> (keys `onset_threshold`, `frame_threshold`, `min_note_len_frames`). Adopting them in the app
-> (per-model decoder thresholds) is the job of the `agent/ios-thresholds` ticket. Until that
-> lands, `BasicPitchDecoder` on main still uses Spotify's defaults.
+> (keys `onset_threshold`, `frame_threshold`, `min_note_len_frames`). The app reads them per model
+> at load time: `models.lock` pins that asset as `models/BasicPitchPoly.thresholds.json`, next to
+> the package (see §6a).
 > Held-out onset F1 vs Spotify defaults: GuitarSet 0.843 vs 0.802, MAESTRO 0.735 vs 0.695,
 > SMD 0.762 vs 0.703. No fine-tune beat this on real audio (EXPERIMENTS.md). The rest of
 > this doc covers swapping in a different checkpoint later.
@@ -123,8 +123,7 @@ The decoder is `BasicPitchDecoder.decode(frames:onset:contour:thresholds:)` (a p
 frames, energy tolerance 11).
 
 **Thresholds (shipping):** onset **0.7**, frame **0.4**, min note **5 frames**. They are published
-in `decoder-thresholds.json` (release `model-latest`). The app adopts them on branch
-`agent/ios-thresholds` (main's `BasicPitchDecoder` still has 0.5 / 0.3 / 11). They were tuned for the stock weights by grid search (onset 0.3-0.8 x frame 0.2-0.5 x
+in `decoder-thresholds.json` (release `model-latest`) and reach the app as the model's sidecar (§6a). They were tuned for the stock weights by grid search (onset 0.3-0.8 x frame 0.2-0.5 x
 min note {5, 7, 11}) on the mixed validation set, then checked on the held-out tests:
 
 | set | tuned 0.7 / 0.4 / 5 | Spotify 0.5 / 0.3 / 11 |
@@ -135,10 +134,28 @@ min note {5, 7, 11}) on the mixed validation set, then checked on the held-out t
 | synthetic GUGS / FluidR3 | 0.887 / 0.921 | 0.861 / 0.901 |
 
 A different checkpoint needs its own tuned values (they ship in each release's notes /
-`metrics.json`). Pass them with `BasicPitchDecoder.Thresholds(onset:frame:)` from the
-`Transcriber` call site. On main `minNoteLen` is a static constant, so a per-model value needs
-a parameter (that is part of the `agent/ios-thresholds` ticket).
+`metrics.json` / `decoder-thresholds.json`); they go in that model's sidecar (§6a).
 The web demo uses the same values (min note 58 ms = 5 frames).
+
+### 6a. Where thresholds live (per model)
+
+- **File:** `<models>/<Package>.thresholds.json` next to the package, e.g. `models/BasicPitchPoly.thresholds.json`
+  beside `BasicPitchPoly.mlpackage` (outside the package, so retuning never changes the compiled-model cache key).
+  Format = the release's `decoder-thresholds.json`: `onset_threshold`, `frame_threshold`, optional
+  `min_note_len_frames` (extra keys ignored).
+- **Pinned in `models.lock`** like any model file (sha256 + release URL). `scripts/fetch-models` installs it,
+  using `gh release download` for this private repo's release URLs (CI sets `GH_TOKEN`); the Xcode build
+  phase bundles every `models.lock` name, so it ships inside `<App>.app/models/`.
+- **Read at load time:** `BasicPitchModel(modelsDirectory:)` sets `model.thresholds` (and
+  `thresholdsFromSidecar`); `Transcriber` and `StreamingTranscriber` decode with `model.thresholds`.
+  There are no global threshold constants; `minNoteLenFrames` is part of the per-model value.
+- **Missing or invalid sidecar:** documented Spotify defaults, `Thresholds.basicPitchDefaults`
+  (onset 0.5, frame 0.3, min note 11 frames).
+- **New fine-tuned release:** in `models.lock`, replace the three stock `BasicPitchPoly.mlpackage/*` lines with the
+  release's Core ML zip line (`models.lock.snippet`) and replace the `BasicPitchPoly.thresholds.json` line with that
+  release's `decoder-thresholds.json` (sha256 from `SHA256SUMS`). `models.release.lock` is a working example
+  (model-latest zip + sidecar); CI fetches it into a separate folder and runs `ModelThresholdsTests` against it.
+  Pin by sha256: `model-latest` moves, so a re-pointed release fails the hash check until the lock is updated.
 
 ## 7. Where it plugs in
 

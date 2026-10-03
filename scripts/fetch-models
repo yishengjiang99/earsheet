@@ -46,6 +46,22 @@ sha256_tree() {
     while IFS= read -r -d '' f; do printf '%s' "${f#./}"; cat -- "$f"; done
   ) | sha256 /dev/stdin
 }
+# Release assets of this private repo need auth: for a
+# https://github.com/<owner>/<repo>/releases/download/<tag>/<file> URL, use `gh release download`
+# when gh is installed and authenticated (CI sets GH_TOKEN). Still sha256-checked below.
+gh_release_download() {
+  local u="$1" out="$2" rest owner repo tag file
+  case "$u" in https://github.com/*/*/releases/download/*/*) ;; *) return 1 ;; esac
+  command -v gh >/dev/null 2>&1 || return 1
+  rest="${u#https://github.com/}"
+  owner="${rest%%/*}"; rest="${rest#*/}"
+  repo="${rest%%/*}"; rest="${rest#*/releases/download/}"
+  tag="${rest%%/*}"; file="${rest#*/}"
+  rm -rf "$TMP/gh" && mkdir -p "$TMP/gh"
+  gh release download "$tag" -R "$owner/$repo" -p "$file" -D "$TMP/gh" >/dev/null 2>&1 || return 1
+  [ -f "$TMP/gh/$file" ] || return 1
+  mv -f "$TMP/gh/$file" "$out"
+}
 command -v curl >/dev/null 2>&1 || die "need curl"
 [ -f "$LOCK" ] || die "lock file not found: $LOCK"
 
@@ -109,6 +125,8 @@ while read -r want name url extra || [ -n "${want:-}" ]; do
   if [ -n "${MODELS_ASSET_DIR:-}" ] && [ -f "$MODELS_ASSET_DIR/$(basename "$url")" ]; then
     log "local  $MODELS_ASSET_DIR/$(basename "$url")"
     cp -f "$MODELS_ASSET_DIR/$(basename "$url")" "$asset"
+  elif gh_release_download "$url" "$asset"; then
+    log "gh     $url"
   else
   log "fetch  $url"
   if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 -sS -o "$asset" "$url"; then

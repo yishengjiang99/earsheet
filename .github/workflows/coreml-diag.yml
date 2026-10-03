@@ -10,6 +10,10 @@ on:
         type: boolean
         default: false
 
+# scripts/fetch-models downloads private release assets (models.lock: BasicPitchPoly.thresholds.json) with gh.
+env:
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   macos:
     name: macOS swift test (SegNet + cache)

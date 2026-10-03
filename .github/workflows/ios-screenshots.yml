@@ -7,6 +7,10 @@ name: iOS simulator screenshots
 on:
   workflow_dispatch:
 
+# scripts/fetch-models downloads private release assets (models.lock: BasicPitchPoly.thresholds.json) with gh.
+env:
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   shots:
     runs-on: macos-15

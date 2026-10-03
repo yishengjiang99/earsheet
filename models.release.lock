@@ -1,0 +1,7 @@
+# Release-ZIP swap flow (docs/finetune/IOS_MODEL_HANDOFF.md §3): the Core ML package from the
+# model-latest release ZIP plus that release's decoder-thresholds.json sidecar. CI fetches this into a
+# separate directory (MODELS_LOCK=models.release.lock MODELS_DIR=...) and runs the HearSheet release-model
+# test against it. To ship a release model, move these two lines into models.lock in place of the three
+# stock BasicPitchPoly.mlpackage/* lines and the stock sidecar line.
+91a6697dec5d87e3563e6def1dfa3e1bdc8c02fc98f05817aff9767406c80db5  BasicPitchPoly.mlpackage  https://github.com/yishengjiang99/earsheet/releases/download/model-latest/basic-pitch-model-ft-exp0-coreml.zip
+e5488e3e8577bb9eefcfb54890039058ac0ebaa6cdb1b631f33717f721a0a003  BasicPitchPoly.thresholds.json  https://github.com/yishengjiang99/earsheet/releases/download/model-latest/decoder-thresholds.json

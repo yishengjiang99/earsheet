@@ -16,6 +16,10 @@ concurrency:
   group: ios-testflight
   cancel-in-progress: false
 
+# scripts/fetch-models downloads private release assets (models.lock: BasicPitchPoly.thresholds.json) with gh.
+env:
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   build-upload:
     name: Archive and upload

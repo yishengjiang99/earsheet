@@ -25,6 +25,12 @@ public final class BasicPitchModel {
 
     private let model: MLModel
     private let lock = NSLock()
+    /// Decoder thresholds that belong to this model, read at load time from the
+    /// package's sidecar (`BasicPitchPoly.thresholds.json` next to the package);
+    /// `BasicPitchDecoder.Thresholds.basicPitchDefaults` when there is none.
+    public let thresholds: BasicPitchDecoder.Thresholds
+    /// Whether `thresholds` came from a sidecar (false = documented defaults).
+    public let thresholdsFromSidecar: Bool
     private let featureNames: (note: String, onset: String, contour: String)
 
     /// - Parameter modelsDirectory: directory containing `BasicPitchPoly.mlpackage`
@@ -50,6 +56,9 @@ public final class BasicPitchModel {
         let m = try MLModel(contentsOf: compiledURL, configuration: config)
         self.model = m
         self.featureNames = try Self.resolveFeatureNames(model: m)
+        let loaded = BasicPitchDecoder.Thresholds.load(forPackageAt: packageURL)
+        self.thresholds = loaded.thresholds
+        self.thresholdsFromSidecar = loaded.fromSidecar
     }
 
     public struct Posteriorgrams {
@@ -131,13 +140,16 @@ public final class BasicPitchModel {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true)
-        let key = try fnv1aHex(of: packageURL)
+        let key = try cacheKey(forPackageAt: packageURL)
         return support
             .appendingPathComponent("EarSheet", isDirectory: true)
             .appendingPathComponent("BasicPitchPoly-\(key).mlmodelc", isDirectory: true)
     }
 
-    private static func fnv1aHex(of packageURL: URL) throws -> String {
+    /// FNV-1a over every regular file in the package (relative path + bytes, sorted by path),
+    /// including `weights/weight.bin`. The thresholds sidecar lives outside the package, so
+    /// changing thresholds never forces a recompile.
+    static func cacheKey(forPackageAt packageURL: URL) throws -> String {
         let rootPath = packageURL.standardizedFileURL.path
         let enumerator = FileManager.default.enumerator(
             at: packageURL, includingPropertiesForKeys: [.isRegularFileKey])
