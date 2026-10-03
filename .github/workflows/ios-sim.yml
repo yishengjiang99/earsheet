@@ -79,6 +79,10 @@ jobs:
             -only-testing:EarSheetTests/SmokeTests \
             -only-testing:EarSheetTests/ImportTranscriptionTests \
             -only-testing:EarSheetTests/StreamingExportTests \
+            -only-testing:EarSheetTests/APIClientTests \
+            -only-testing:EarSheetTests/VerifyQueueTests \
+            -only-testing:EarSheetTests/TelemetryTests \
+            -only-testing:EarSheetTests/PushPermissionTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
@@ -102,7 +106,7 @@ jobs:
       - name: Test summary
         if: always()
         run: |
-          grep -E "SmokeTests|ImportTranscriptionTests|Bundled models|models not bundled" "$RUNNER_TEMP/xcodebuild.log" || echo "no EarSheet test lines"
+          grep -E "SmokeTests|ImportTranscriptionTests|APIClientTests|VerifyQueueTests|TelemetryTests|PushPermissionTests|Bundled models|models not bundled" "$RUNNER_TEMP/xcodebuild.log" || echo "no EarSheet test lines"
           if grep -F "should not be called on the main thread" "$RUNNER_TEMP/xcodebuild.log"; then
             echo "::warning::CoreML main-thread warning present"
           else
