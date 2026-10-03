@@ -58,9 +58,9 @@ final class ListeningSession: ObservableObject {
     private func begin() async {
         // Load the model before opening the mic; inference must keep up live.
         do {
-            let model = try await Task.detached(priority: .userInitiated) {
+            let model = try await runCancellableDetached {
                 try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
-            }.value
+            }
             let streamer = StreamingTranscriber(model: model)
             self.streamer = streamer
             let queue = self.pumpQueue

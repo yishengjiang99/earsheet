@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
+    @State private var importTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -165,24 +166,26 @@ struct LibraryView: View {
 
     /// Video from Photos: extract the audio track, then transcribe as usual.
     private func importVideo(url: URL) {
-        Task { @MainActor in
+        importTask?.cancel()
+        importTask = Task { @MainActor in
             do {
-                let samples = try await Task.detached(priority: .userInitiated) {
+                let samples = try await runCancellableDetached {
                     try AudioImport.loadMono22050(asset: AVAsset(url: url))
-                }.value
+                }
                 try? FileManager.default.removeItem(at: url) // temp copy
                 guard !samples.isEmpty else { return }
-                let notes = try await Task.detached(priority: .userInitiated) {
-                    let box = ModelBox.shared
-                    let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
+                let notes = try await runCancellableDetached {
+                    let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
-                }.value
+                }
                 let score = Quantizer.quantize(notes)
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that video's audio.")
                 } else {
                     _ = library.addTake(score: score)
                 }
+            } catch is CancellationError {
+                // Superseded by a newer import; stay silent.
             } catch {
                 try? FileManager.default.removeItem(at: url)
                 library.postNotice("Could not read that video's audio.")
@@ -191,23 +194,25 @@ struct LibraryView: View {
     }
 
     private func importAudio(url: URL) {
-        Task { @MainActor in
+        importTask?.cancel()
+        importTask = Task { @MainActor in
             do {
-                let samples = try await Task.detached(priority: .userInitiated) {
+                let samples = try await runCancellableDetached {
                     try AudioImport.loadMono22050(url: url)
-                }.value
+                }
                 guard !samples.isEmpty else { return }
-                let notes = try await Task.detached(priority: .userInitiated) {
-                    let box = ModelBox.shared
-                    let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
+                let notes = try await runCancellableDetached {
+                    let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
-                }.value
+                }
                 let score = Quantizer.quantize(notes)
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
                     _ = library.addTake(score: score)
                 }
+            } catch is CancellationError {
+                // Superseded by a newer import; stay silent.
             } catch {
                 library.postNotice("Could not read that audio file.")
             }
