@@ -1,10 +1,29 @@
 #!/bin/sh
-# Idempotent model fetch. Weights are pinned in models.lock and never committed.
+# Idempotent. Copies the local fine-tune pin, or no-ops when models.lock has no local line.
 set -eu
-mkdir -p models
-if [ ! -s models.lock ]; then
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+mkdir -p "$root/models"
+lock=$root/models.lock
+if [ ! -s "$lock" ]; then
   echo "models.lock empty; nothing to fetch"
   exit 0
 fi
-echo "models.lock present; fetch step not wired yet"
+if grep -q '^local ' "$lock"; then
+  rel=$(awk '/^local / {print $2; exit}' "$lock")
+  src=$root/$rel
+  if [ ! -d "$src" ] && [ -d "$root/build/BasicPitchPoly.mlpackage" ]; then
+    src=$root/build/BasicPitchPoly.mlpackage
+  fi
+  if [ ! -d "$src" ]; then
+    echo "pin missing: $rel (run scripts/bundle-coreml after export)" >&2
+    exit 1
+  fi
+  if [ "$src" != "$root/models/BasicPitchPoly.mlpackage" ]; then
+    rm -rf "$root/models/BasicPitchPoly.mlpackage"
+    cp -R "$src" "$root/models/BasicPitchPoly.mlpackage"
+  fi
+  echo "models ready $root/models/BasicPitchPoly.mlpackage"
+  exit 0
+fi
+echo "models.lock has no local pin yet"
 exit 0

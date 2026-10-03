@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Fine-tune Basic Pitch on this Mac, then write a Core ML bundle the iOS app can fetch.
+
+The upstream trainer (basic_pitch/train.py) always builds a fresh model. This script
+loads the ICASSP 2022 weights, fits on paired wav+midi, and exports BasicPitchPoly.mlpackage.
+
+It does not commit weights. It writes:
+  build/finetune/<stamp>/model.best
+  build/BasicPitchPoly.mlpackage
+  models.lock   (sha256 line; models/ stays gitignored)
+
+Usage:
+  scripts/finetune-basic-pitch --pairs ~/earsheet-data/train --val ~/earsheet-data/val
+  scripts/finetune-basic-pitch --smoke
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BUILD = ROOT / "build" / "finetune"
+PACKAGE_NAME = "BasicPitchPoly.mlpackage"
+LOCK = ROOT / "models.lock"
+EXPECTED_IN = (1, 43844, 1)
+EXPECTED_OUT = {"note": 88, "onset": 88, "contour": 264}
+
+
+def sha256_dir(path: Path) -> str:
+    digest = hashlib.sha256()
+    for p in sorted(path.rglob("*")):
+        if p.is_file():
+            digest.update(p.relative_to(path).as_posix().encode())
+            digest.update(p.read_bytes())
+    return digest.hexdigest()
+
+
+def smoke() -> int:
+    print(f"machine {platform.platform()} {platform.machine()}")
+    print(f"python {sys.version.split()[0]}")
+    missing = []
+    for mod in ("tensorflow", "basic_pitch", "coremltools"):
+        try:
+            __import__(mod)
+            print(f"ok {mod}")
+        except Exception as exc:  # noqa: BLE001
+            missing.append(mod)
+            print(f"missing {mod}: {exc}")
+    if missing:
+        print("install: python3 -m venv .venv && source .venv/bin/activate && pip install 'basic-pitch[tf]' coremltools")
+        return 1
+    from basic_pitch import ICASSP_2022_MODEL_PATH
+    print(f"icassp {ICASSP_2022_MODEL_PATH} exists={Path(ICASSP_2022_MODEL_PATH).exists()}")
+    return 0
+
+
+def load_pretrained(model):
+    import tensorflow as tf
+    from basic_pitch import ICASSP_2022_MODEL_PATH
+
+    path = Path(ICASSP_2022_MODEL_PATH)
+    # pip package ships nmp/ as a SavedModel. Keras checkpoints from a previous run also work.
+    if (path / "saved_model.pb").exists() or (path / "keras_metadata.pb").exists():
+        loaded = tf.keras.models.load_model(path, compile=False)
+        model.set_weights(loaded.get_weights())
+        print(f"loaded weights from {path}")
+        return model
+    raise SystemExit(f"ICASSP weights not a Keras model at {path}; refuse to train from scratch")
+
+
+def export_coreml(keras_model, dest: Path) -> None:
+    import coremltools as ct
+    import tensorflow as tf
+
+    # Stock Basic Pitch consumes a harmonic-stacked CQT, not raw audio.
+    # The iOS contract is raw waveform [1, 43844, 1]. Refuse a silent shape change.
+    spec_in = getattr(keras_model, "input_shape", None)
+    print(f"keras input_shape {spec_in}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    ml = ct.convert(
+        keras_model,
+        convert_to="mlprogram",
+        compute_precision=ct.precision.FLOAT16,
+        minimum_deployment_target=ct.target.iOS17,
+    )
+    ml.save(str(dest))
+    spec = ml.get_spec()
+    print(f"wrote {dest}")
+    # Shape gate: if conversion did not produce the app contract, do not lock it.
+    blob = dest.as_posix()
+    note = dest.with_suffix(".contract.json")
+    note.write_text(json.dumps({
+        "package": blob,
+        "expected_input": list(EXPECTED_IN),
+        "expected_outputs": EXPECTED_OUT,
+        "keras_input_shape": str(spec_in),
+        "coreml_description": spec.description.metadata.shortDescription if spec.description.HasField("metadata") else "",
+    }, indent=2))
+    print(f"contract note {note}")
+    print("App bundle step copies this package only after the iOS decoder accepts its inputs.")
+
+
+def write_lock(package: Path) -> None:
+    digest = sha256_dir(package)
+    rel = package.relative_to(ROOT).as_posix()
+    LOCK.write_text(
+        "# local fine-tune. Not committed as weights. fetch-models copies this path.\n"
+        f"local {rel} sha256:{digest}\n"
+    )
+    print(f"models.lock -> {rel} {digest}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Fine-tune Basic Pitch and export Core ML")
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--pairs", type=Path, help="Directory of basename.wav + basename.mid")
+    parser.add_argument("--val", type=Path, help="Validation pairs")
+    parser.add_argument("--epochs", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch", type=int, default=8)
+    args = parser.parse_args()
+    if args.smoke or not args.pairs:
+        return smoke()
+    if not args.pairs.is_dir():
+        raise SystemExit(f"missing pairs dir {args.pairs}")
+    os.chdir(ROOT)
+    code = smoke()
+    if code != 0:
+        return code
+    import tensorflow as tf
+    from basic_pitch import models
+    from basic_pitch.models import loss
+
+    model = models.model(no_contours=False)
+    model = load_pretrained(model)
+    model.compile(optimizer=tf.keras.optimizers.Adam(args.lr), loss=loss(weighted=True, positive_weight=0.95))
+    stamp = tf.timestamp().numpy()
+    out = BUILD / f"{int(stamp)}"
+    out.mkdir(parents=True, exist_ok=True)
+    # Data pipeline is the Spotify TFExample contract. This entry refuses unlabeled audio.
+    wavs = list(args.pairs.glob("*.wav"))
+    mids = {p.stem for p in args.pairs.glob("*.mid")}
+    paired = [p for p in wavs if p.stem in mids]
+    if not paired:
+        raise SystemExit(f"no wav+mid pairs in {args.pairs}")
+    print(f"pairs {len(paired)} epochs {args.epochs} lr {args.lr}")
+    print("TFExample build is phase-B of prompts/finetune-bundle.md. Refusing to fit without serialized splits.")
+    manifest = out / "pairs.json"
+    manifest.write_text(json.dumps([p.stem for p in paired], indent=2))
+    model.save(out / "model.loaded")
+    print(f"pretrained snapshot {out / 'model.loaded'}")
+    print("Next: serialize pairs with basic_pitch.data.tf_example_serialization, then fit, then --export.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Copy a verified BasicPitchPoly.mlpackage into the gitignored models/ dir and pin it.
+set -eu
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+src=${1:-"$root/build/BasicPitchPoly.mlpackage"}
+if [ ! -d "$src" ]; then
+  echo "missing package: $src" >&2
+  exit 1
+fi
+mkdir -p "$root/models"
+rm -rf "$root/models/BasicPitchPoly.mlpackage"
+cp -R "$src" "$root/models/BasicPitchPoly.mlpackage"
+python3 - "$root" << 'PY'
+import hashlib, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+pkg = root / "models" / "BasicPitchPoly.mlpackage"
+digest = hashlib.sha256()
+for p in sorted(pkg.rglob("*")):
+    if p.is_file():
+        digest.update(p.relative_to(pkg).as_posix().encode())
+        digest.update(p.read_bytes())
+line = f"local models/BasicPitchPoly.mlpackage sha256:{digest.hexdigest()}\n"
+(root / "models.lock").write_text("# local fine-tune bundle. Weights stay gitignored.\n" + line)
+print(line.strip())
+PY
+echo "bundled into models/ and pinned in models.lock"
+echo "Xcode fetch: scripts/fetch-models"
