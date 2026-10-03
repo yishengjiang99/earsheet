@@ -94,9 +94,8 @@ POST /api/devices/register
 
 ## 8. Push (APNs)
 
-Xcode setup, which **isn't done yet**:
-- Add the Push Notifications capability to target `EarSheet`. That creates `EarSheet.entitlements` with `aps-environment` and sets `CODE_SIGN_ENTITLEMENTS`.
-- Enable Push Notifications on App ID `com.ragnus.pnge` in the developer portal. Then the CI App Store profile (`ZVGVFXJTSU`, created by `ios-testflight.yml`) has to be **regenerated** so it carries the entitlement: delete it or let the workflow create a new one. Deleting a profile needs owner approval.
+Apple side, **done 2026-10-03** (`asc-enable-push.yml`): PUSH_NOTIFICATIONS is enabled on App ID `com.ragnus.pnge`, and the CI App Store profile was regenerated as `GLML8673YB` (embedded `aps-environment` = `production`; old `ZVGVFXJTSU` deleted).
+App side, **not done** (branch `ios/iap-server-integration`): add the Push Notifications capability to target `EarSheet`. That gives `EarSheet.entitlements` with `<key>aps-environment</key><string>production</string>` and sets `CODE_SIGN_ENTITLEMENTS`. For App Store and TestFlight builds the value must be `production`, which matches the profile. Xcode automatic signing for debug builds swaps in `development`.
 - Server topic: `com.ragnus.pnge`. The key is the team's APNs auth key (token-based, works for both environments).
 
 ```swift

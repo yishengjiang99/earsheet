@@ -36,7 +36,7 @@ Simulator tests as CI runs them:
 ## 4. CI and TestFlight (`.github/workflows/`)
 
 - `ios-sim.yml`: runs on every push and PR to main (docs and ASC-only changes are ignored). Simulator tests above plus the HearSheet and SF2Player package tests.
-- `ios-testflight.yml` (manual, input `notes`): checks that ASC app 6818838017 has bundle ID `com.ragnus.pnge`. It then reuses or creates the App Store profile via the ASC API ("AI Music Radar App Store (CI)", `ZVGVFXJTSU`), archives with build number = run number, uploads, and waits for processing. `gh workflow run ios-testflight.yml --ref main -f notes="…"`.
+- `ios-testflight.yml` (manual, input `notes`): checks that ASC app 6818838017 has bundle ID `com.ragnus.pnge`. It then reuses or creates the App Store profile via the ASC API ("AI Music Radar App Store (CI)", `GLML8673YB`, push-enabled), archives with build number = run number, uploads, and waits for processing. `gh workflow run ios-testflight.yml --ref main -f notes="…"`.
   - Latest: **build 6**, VALID and ready for beta testing. TestFlight group "Internal" (all builds).
 - Secrets (names only): `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY_P8`, `IOS_DISTRIBUTION_P12_BASE64`, `IOS_DISTRIBUTION_P12_PASSWORD`, and the optional, unset `IOS_APPSTORE_PROFILE_PNGE_BASE64`. See [`../AGENTS.md`](../AGENTS.md).
 - ASC helpers: `asc-status`, `asc-assign-internal-testing`, `asc-beta-group-remove-testers`, `asc-set-urls`, `asc-setup-iap`, `asc-submit-app-store`, `asc-cancel-review`, `asc-clear-export-compliance`, `ios-screenshots`. Server: `server-ci.yml`.
@@ -49,7 +49,7 @@ Simulator tests as CI runs them:
 | `com.ragnus.pnge.pro.yearly` | auto-renewable, same group (higher level) | $29.99/year | 7-day free |
 | `com.ragnus.pnge.lifetime` | non-consumable | $49.99 | – |
 
-Prices for 175 territories (Apple-equalized from USA) and availability are set, ASSN v2 points at the server, and all three are in `MISSING_METADATA` until each gets a review screenshot. Created by `scripts/asc/setup_iap.py` / `asc-setup-iap.yml`, which is idempotent and create-only.
+Prices for 175 territories (Apple-equalized from USA) and availability are set, ASSN v2 points at the server, and all three have a review screenshot and are **READY_TO_SUBMIT** (submit them with the next app version). Created by `scripts/asc/setup_iap.py` / `asc-setup-iap.yml`, which is idempotent and create-only.
 
 ## 6. StoreKit 2, entitlements, paywall → [`iap/IOS_INTEGRATION.md`](iap/IOS_INTEGRATION.md)
 
@@ -62,7 +62,7 @@ Prices for 175 territories (Apple-equalized from USA) and availability are set, 
 ## 7. Devices, push, telemetry
 
 - **Device:** `POST /api/devices/register` on launch with a Keychain `installId` (not the IDFV). Details in [IOS_INTEGRATION §7](iap/IOS_INTEGRATION.md#7-device-registration).
-- **Push:** add the Push Notifications capability (`aps-environment` entitlement, `EarSheet.entitlements`) and enable Push on App ID `com.ragnus.pnge`, then regenerate the CI profile. Send the hex token to `POST /api/push/register` with `environment` set to `sandbox` for Xcode/debug builds or `production` for TestFlight/App Store. Topic `com.ragnus.pnge`. Details in [IOS_INTEGRATION §8](iap/IOS_INTEGRATION.md#8-push-apns).
+- **Push:** Push is enabled on App ID `com.ragnus.pnge`, and the CI profile `GLML8673YB` carries `aps-environment=production`. The app still needs the Push Notifications capability (`EarSheet.entitlements`, `aps-environment` = `production`; Xcode debug signing uses `development`). Send the hex token to `POST /api/push/register` with `environment` set to `sandbox` for Xcode/debug builds or `production` for TestFlight/App Store. Topic `com.ragnus.pnge`. Details in [IOS_INTEGRATION §8](iap/IOS_INTEGRATION.md#8-push-apns).
 - **Telemetry:** on-disk queue, flushed every 30 s, at 50 events, or on background; backoff, and honor `Retry-After`. No audio or PII. Event list and limits: [`telemetry.md`](telemetry.md).
 
 ## 8. API reference
@@ -135,9 +135,9 @@ Release [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag
 
 - [ ] **StoreKit 2 client** (none in `Sources/App` yet): products, purchase with appAccountToken, `Transaction.updates`, verify/restore calls, the `Entitlements` cache, the Restore button.
 - [ ] **Paywall UI and gates** per PAYWALL_FLOW (save cap 3, 30 s import/PDF cap, MIDI/MusicXML lock). Lifetime launch price ($39.99 for 30 days) isn't configured.
-- [ ] **Push:** capability and `aps-environment` entitlement, enable Push on the App ID, regenerate the CI profile, token registration, and a permission prompt at a sensible moment.
+- [ ] **Push (app side):** add the Push Notifications capability so `EarSheet.entitlements` has `aps-environment` = `production` (`CODE_SIGN_ENTITLEMENTS`). Then do token registration and a permission prompt at a sensible moment. Already done on Apple's side: PUSH_NOTIFICATIONS is on App ID `com.ragnus.pnge`, and the CI App Store profile is now `GLML8673YB` (has `aps-environment=production`; `ZVGVFXJTSU` was deleted). The server's APNs key `GAPGVZ7K2D` authenticates with sandbox and production.
 - [ ] **Device registration** and the **telemetry client** (queue, flush, opt-out toggle in Settings).
-- [ ] **ASC:** a review screenshot for each of the 3 products, then submit them with the next app version. Marketing URL, EULA and subtitle aren't set.
+- [ ] **ASC:** submit the 3 products with the next app version (all are READY_TO_SUBMIT and have review screenshots). Marketing URL, EULA and subtitle aren't set. The en-US 6.9" and 13" screenshots are uploaded (`asc-upload-screenshots.yml`).
 - [ ] Add a StoreKit configuration file (`.storekit`) for local and simulator testing with the IDs above. Test sandbox purchases on TestFlight (environment `Sandbox` shows up in the admin panel).
 - [ ] Ship a fine-tuned model once an experiment beats exp0 (see EXPERIMENTS.md).
 - [ ] The server doesn't call the App Store Server API (verification is offline JWS plus ASSN). Add it only if status refresh or refund lookups become necessary.
