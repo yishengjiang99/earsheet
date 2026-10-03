@@ -9,9 +9,15 @@ on:
   workflow_dispatch:
     inputs:
       emails:
-        description: Comma-separated emails to revoke
-        required: true
+        description: Comma-separated emails to revoke (ignored when keep_only is set)
+        required: false
         type: string
+        default: ''
+      keep_only:
+        description: Keep-only mode - delete EVERY betaTester account-wide except this email (no team-user changes)
+        required: false
+        type: string
+        default: ''
       dry_run:
         required: false
         type: boolean
@@ -27,6 +33,7 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           EMAILS: ${{ inputs.emails }}
+          KEEP_ONLY: ${{ inputs.keep_only }}
           DRY_RUN: ${{ inputs.dry_run }}
           PROTECTED: yisheng.jiang@gmail.com,yisheng@fundrx.co,yisheng@appdog.com
         run: |
@@ -71,6 +78,29 @@ jobs:
                 emails = sorted((t['attributes'].get('email') or '?') for t in pages(f"/v1/betaGroups/{g['id']}/betaTesters?limit=200"))
                 print(f"[{tag}] {name} ({bid}) group '{g['attributes'].get('name')}' internal={g['attributes'].get('isInternalGroup')}: {emails}")
           report('before')
+
+          keep = os.environ.get('KEEP_ONLY', '').strip().lower()
+          if keep:
+            # Keep-only mode: TestFlight testers only; team users / invitations are not touched.
+            print('keep_only', keep)
+            seen = {}
+            for t in pages('/v1/betaTesters?limit=200'): seen[t['id']] = t
+            for app in pages('/v1/apps?limit=200'):
+              for g in pages(f"/v1/apps/{app['id']}/betaGroups?limit=200"):
+                for t in pages(f"/v1/betaGroups/{g['id']}/betaTesters?limit=200"): seen[t['id']] = t
+            for tid, t in sorted(seen.items(), key=lambda kv: (kv[1]['attributes'].get('email') or '').lower()):
+              email = (t['attributes'].get('email') or '').strip().lower()
+              if email == keep: print('KEEP betaTester', email, tid); continue
+              print('betaTester', email or '(no email)', tid, 'DELETE' if not dry else '(dry run)')
+              if not dry:
+                try: print('  ->', api('DELETE', f"/v1/betaTesters/{tid}")[0])
+                except ApiError as e: errors.append(str(e)); print('  ERROR', e)
+            if not dry: time.sleep(5)
+            report('after')
+            if errors:
+              print('ERRORS:'); [print('  ', e) for e in errors]
+              raise SystemExit(1)
+            raise SystemExit(0)
 
           # 1) TestFlight: delete the betaTester records (removes them from every group of every app).
           for email in sorted(targets):
