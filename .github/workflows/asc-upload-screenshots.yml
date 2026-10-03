@@ -1,0 +1,27 @@
+name: ASC upload screenshots (IAP review + App Store en-US)
+
+# scripts/asc/upload_screenshots.py: IAP review screenshots for the 3 products, and replaces the en-US
+# APP_IPHONE_67 (6.9") and APP_IPAD_PRO_3GEN_129 (13") sets on the editable version, then reads back and verifies.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload and verify
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          pip install -q PyJWT cryptography requests
+          python3 -u scripts/asc/upload_screenshots.py
