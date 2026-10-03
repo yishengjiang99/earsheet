@@ -7,16 +7,14 @@ import Foundation
 ///
 /// The model graph is unchanged: note [time, 88], onset [time, 88],
 /// contour [time, 264] heads over MIDI 21–108 (A0–C8).
-/// Defaults are tuned for the stock ICASSP 2022 weights on held-out real audio
-/// (docs/finetune/EXPERIMENTS.md E0t2): onset 0.7, frame 0.4, min note 5 frames.
-/// Spotify's Python defaults are 0.5 / 0.3 / 11.
+/// Defaults are Spotify's; `Thresholds` exists for debug use only.
 public enum BasicPitchDecoder {
     public struct Thresholds: Equatable, Sendable {
-        /// Tuned (Spotify `DEFAULT_ONSET_THRESHOLD` is 0.5).
-        public var onset: Float = 0.7
-        /// Tuned (Spotify `DEFAULT_FRAME_THRESHOLD` is 0.3).
-        public var frame: Float = 0.4
-        public init(onset: Float = 0.7, frame: Float = 0.4) {
+        /// Spotify `DEFAULT_ONSET_THRESHOLD`.
+        public var onset: Float = 0.5
+        /// Spotify `DEFAULT_FRAME_THRESHOLD`.
+        public var frame: Float = 0.3
+        public init(onset: Float = 0.5, frame: Float = 0.3) {
             self.onset = onset
             self.frame = frame
         }
@@ -34,7 +32,7 @@ public enum BasicPitchDecoder {
         public var pitchBend: [Int]?
     }
 
-    static let minNoteLen = 5         // frames (58 ms), tuned; Spotify DEFAULT_MIN_NOTE_LEN is 11
+    static let minNoteLen = 11        // Spotify DEFAULT_MIN_NOTE_LEN (frames)
     static let energyTolerance = 11   // Spotify ENERGY_TOLERANCE (trailing frames)
     static let maxFreqIdx = 87
     static let midiOffset = 21
