@@ -1,0 +1,24 @@
+name: ASC setup IAP (create-only)
+
+# Runs scripts/asc/setup_iap.py: ASSN v2 URLs, subscription group, Pro monthly/yearly (+7-day trial), Lifetime.
+# Idempotent; never deletes or changes existing prices.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q PyJWT cryptography
+      - run: python3 scripts/asc/setup_iap.py
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
