@@ -208,7 +208,6 @@ public enum BasicPitchDecoder {
             let fStart = max(freqIdx - tol, 0)
             let fEnd = min(nContours, freqIdx + tol + 1)
             let gLo = max(0, tol - freqIdx)
-            let gHi = windowLength - max(0, freqIdx - (nContours - tol - 1))
             let pbShift = tol - max(0, tol - freqIdx)
             var bends: [Int] = []
             bends.reserveCapacity(max(0, ev.e - ev.s))

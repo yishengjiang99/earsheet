@@ -290,7 +290,6 @@ private struct Layout {
         self.beamGroups = beamGroups
         self.staffLines = staffLines
         self.barlines = barlines
-        self.grandStaff = grand
         self.clefs = clefs
         self.keySig = keySig
         self.timeSig = timeSig

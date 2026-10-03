@@ -22,7 +22,6 @@ public enum Quantizer {
         let (meter, barPhase) = estimateMeter(onsets: onsets, quarterLen: quarterLen, beatPhase: beatPhase)
         let key = estimateKey(notes: notes)
         let sixteenth = quarterLen / 4
-        let barLen = Double(meter.beatsPerBar) * (4.0 / Double(meter.beatUnit)) * quarterLen
 
         var q: [QuantizedNote] = []
         q.reserveCapacity(notes.count)
