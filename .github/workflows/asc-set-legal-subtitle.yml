@@ -1,0 +1,103 @@
+name: ASC set subtitle, marketing URL, Terms/Privacy footer
+
+# AI Music Radar (6818838017), en-US. Updates only:
+#  - editable appInfo en-US localization: subtitle
+#  - editable App Store version en-US localization: marketingUrl, and appends a Terms of Use / Privacy footer
+#    to the description if the terms link isn't already there
+#  - EULA: reads /v1/apps/{id}/endUserLicenseAgreement only (none = Apple's standard EULA, which is kept)
+# Then reads everything back.
+on:
+  workflow_dispatch:
+    inputs:
+      subtitle:
+        required: false
+        type: string
+        default: Audio to Sheet Music & MIDI
+      marketing_url:
+        required: false
+        type: string
+        default: https://grepawk.com/music-radar/
+      terms_url:
+        required: false
+        type: string
+        default: https://grepawk.com/music-radar/terms
+      privacy_url:
+        required: false
+        type: string
+        default: https://grepawk.com/music-radar/privacy
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set and verify
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          SUBTITLE: ${{ inputs.subtitle }}
+          MARKETING_URL: ${{ inputs.marketing_url }}
+          TERMS_URL: ${{ inputs.terms_url }}
+          PRIVACY_URL: ${{ inputs.privacy_url }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography requests
+          python3 -u <<'PY'
+          import os, sys, time, jwt, requests
+          APP = '6818838017'
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          tok = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200, 'aud': 'appstoreconnect-v1'},
+                           p8, algorithm='ES256', headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          dry = os.environ['DRY_RUN'] == 'true'
+          def api(m, p, body=None, ok404=False):
+            r = requests.request(m, 'https://api.appstoreconnect.apple.com' + p, json=body, headers={'Authorization': f'Bearer {tok}'}, timeout=60)
+            if ok404 and r.status_code == 404: return None
+            if r.status_code >= 400: sys.exit(f'{m} {p} -> {r.status_code}: {r.text[:1500]}')
+            return r.json() if r.text else {}
+          sub, murl, terms, priv = (os.environ[k].strip() for k in ('SUBTITLE', 'MARKETING_URL', 'TERMS_URL', 'PRIVACY_URL'))
+          if len(sub) > 30: sys.exit(f'subtitle is {len(sub)} chars (max 30)')
+          LIVE = {'READY_FOR_DISTRIBUTION', 'READY_FOR_SALE', 'REPLACED_WITH_NEW_INFO'}
+          infos = api('GET', f'/v1/apps/{APP}/appInfos')['data']
+          info = next(i for i in infos if (i['attributes'].get('state') or i['attributes'].get('appStoreState')) not in LIVE)
+          iloc = next(l for l in api('GET', f"/v1/appInfos/{info['id']}/appInfoLocalizations")['data'] if l['attributes']['locale'] == 'en-US')
+          print(f"appInfo {info['id']} state={info['attributes'].get('state')}; subtitle before: {iloc['attributes'].get('subtitle')!r}")
+          if iloc['attributes'].get('subtitle') != sub and not dry:
+            api('PATCH', f"/v1/appInfoLocalizations/{iloc['id']}", {'data': {'type': 'appInfoLocalizations', 'id': iloc['id'], 'attributes': {'subtitle': sub}}})
+          vers = api('GET', f'/v1/apps/{APP}/appStoreVersions?filter[platform]=IOS&limit=20')['data']
+          v = next(x for x in vers if x['attributes'].get('appVersionState') in ('PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED', 'REJECTED', 'METADATA_REJECTED', 'INVALID_BINARY'))
+          vloc = next(l for l in api('GET', f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations")['data'] if l['attributes']['locale'] == 'en-US')
+          a = vloc['attributes']
+          desc = a.get('description') or ''
+          print(f"version {v['attributes']['versionString']} {v['attributes'].get('appVersionState')}; marketingUrl before: {a.get('marketingUrl')!r}; terms link in description: {terms in desc}")
+          attrs = {}
+          if a.get('marketingUrl') != murl: attrs['marketingUrl'] = murl
+          if terms not in desc:
+            footer = f"\n\nTerms of Use: {terms}\nPrivacy Policy: {priv}"
+            if len(desc) + len(footer) > 4000: sys.exit('description would exceed 4000 chars')
+            attrs['description'] = desc.rstrip() + footer
+          if attrs and not dry:
+            api('PATCH', f"/v1/appStoreVersionLocalizations/{vloc['id']}", {'data': {'type': 'appStoreVersionLocalizations', 'id': vloc['id'], 'attributes': attrs}})
+          print(f"{'[dry] would set' if dry else 'set'}: {sorted(attrs) + ([] if iloc['attributes'].get('subtitle') == sub else ['subtitle'])}")
+          eula = (api('GET', f'/v1/apps/{APP}/endUserLicenseAgreement', ok404=True) or {}).get('data')
+          # read back
+          il = api('GET', f"/v1/appInfoLocalizations/{iloc['id']}")['data']['attributes']
+          vl = api('GET', f"/v1/appStoreVersionLocalizations/{vloc['id']}")['data']['attributes']
+          d = vl.get('description') or ''
+          out = [
+            f"subtitle: {il.get('subtitle')!r} ({len(il.get('subtitle') or '')} chars)",
+            f"privacyPolicyUrl: {il.get('privacyPolicyUrl')}",
+            f"marketingUrl: {vl.get('marketingUrl')}",
+            f"supportUrl: {vl.get('supportUrl')}",
+            f"description: {len(d)} chars; ends with: {d[-120:]!r}",
+            f"EULA: {'CUSTOM ' + eula['id'] if eula else 'none set -> Apple Standard EULA applies'}",
+          ]
+          print('\n=== read back ===\n' + '\n'.join(out))
+          ok = dry or (il.get('subtitle') == sub and vl.get('marketingUrl') == murl and terms in d and priv in d)
+          sys.exit(0 if ok else 'verification failed')
+          PY
