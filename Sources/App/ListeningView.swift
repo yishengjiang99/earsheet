@@ -31,15 +31,19 @@ final class ListeningSession: ObservableObject {
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var level: Float = 0
     @Published private(set) var notice: String?
+    @Published var saveLimitReached = false
 
     private let library: TakeLibrary
+    private let proStore: ProStore
+    private var pendingTake: Take?
     private let recorder = AudioRecorder()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
     private var timer: Timer?
 
-    init(library: TakeLibrary) {
+    init(library: TakeLibrary, proStore: ProStore) {
         self.library = library
+        self.proStore = proStore
     }
 
     func start() {
@@ -135,6 +139,17 @@ final class ListeningSession: ObservableObject {
                 guard let self else { return }
                 if score.notes.isEmpty {
                     self.phase = .failed("No notes found. Try again, closer to the music.")
+                } else if !self.proStore.isPro && self.library.userTakes.count >= ProStore.freeSaveLimit {
+                    // Free limit reached: the take is written and viewable,
+                    // but keeping it requires Pro.
+                    let take = Take(id: UUID(),
+                                    title: "Take \(self.library.takes.count + 1)",
+                                    createdAt: Date(),
+                                    score: score,
+                                    isSample: false)
+                    self.pendingTake = take
+                    self.phase = .done(take)
+                    self.saveLimitReached = true
                 } else {
                     let take = self.library.addTake(score: score)
                     self.phase = .done(take)
@@ -144,6 +159,14 @@ final class ListeningSession: ObservableObject {
     }
 
     func clearNotice() { notice = nil }
+
+    /// Save the pending take after the user upgrades to Pro.
+    func savePendingTake() {
+        guard let take = pendingTake else { return }
+        pendingTake = nil
+        saveLimitReached = false
+        library.importTake(take)
+    }
 
     private func startTimer() {
         stopTimer()
@@ -168,6 +191,7 @@ final class ListeningSession: ObservableObject {
 /// fills with notes as they are heard, and a stop button.
 struct ListeningView: View {
     @StateObject var session: ListeningSession
+    @ObservedObject var proStore: ProStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -195,6 +219,12 @@ struct ListeningView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(session.notice ?? "")
+        }
+        .sheet(isPresented: $session.saveLimitReached) {
+            PaywallView(store: proStore)
+        }
+        .onChange(of: proStore.isPro) { _, isPro in
+            if isPro { session.savePendingTake() }
         }
     }
 

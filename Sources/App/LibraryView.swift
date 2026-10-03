@@ -8,11 +8,15 @@ import SwiftUI
 /// inline; the chevron opens the sheet. The mic button starts listening.
 struct LibraryView: View {
     @StateObject var library: TakeLibrary
+    @ObservedObject var proStore: ProStore
     @State private var showImporter = false
     @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
     @State private var importTask: Task<Void, Never>?
+    @State private var showPaywall = false
+    @State private var showSettings = false
+    @State private var pendingScore: (score: QuantizedScore, title: String?)?
 
     var body: some View {
         NavigationStack {
@@ -72,9 +76,15 @@ struct LibraryView: View {
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
-                SheetDetailView(take: take, library: library)
+                SheetDetailView(take: take, library: library, proStore: proStore)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Choose Audio or MIDI File") { showImporter = true }
@@ -86,6 +96,9 @@ struct LibraryView: View {
                     .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                 }
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(store: proStore)
         }
         .sheet(isPresented: $showImporter) {
             AudioImporter { url in
@@ -105,10 +118,24 @@ struct LibraryView: View {
         .fullScreenCover(isPresented: $showListening) {
             if let session = listeningSession {
                 NavigationStack {
-                    ListeningView(session: session)
+                    ListeningView(session: session, proStore: proStore)
                         .navigationDestination(for: Take.self) { take in
-                            SheetDetailView(take: take, library: library)
+                            SheetDetailView(take: take, library: library, proStore: proStore)
                         }
+                }
+            }
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(store: proStore)
+        }
+        .onChange(of: proStore.isPro) { _, isPro in
+            if isPro, let pending = pendingScore {
+                pendingScore = nil
+                showPaywall = false
+                if let title = pending.title {
+                    _ = library.addTake(title: title, score: pending.score)
+                } else {
+                    _ = library.addTake(score: pending.score)
                 }
             }
         }
@@ -124,7 +151,7 @@ struct LibraryView: View {
 
     private func startListening() {
         library.stopPlayback()
-        listeningSession = ListeningSession(library: library)
+        listeningSession = ListeningSession(library: library, proStore: proStore)
         showListening = true
     }
 
@@ -136,6 +163,18 @@ struct LibraryView: View {
             importMIDI(url: url)
         } else {
             importAudio(url: url)
+        }
+    }
+
+    /// Save a transcribed score, or hold it behind the paywall at the free limit.
+    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil) {
+        if !proStore.isPro && library.userTakes.count >= ProStore.freeSaveLimit {
+            pendingScore = (score, title)
+            showPaywall = true
+        } else if let title {
+            _ = library.addTake(title: title, score: score)
+        } else {
+            _ = library.addTake(score: score)
         }
     }
 
@@ -156,8 +195,7 @@ struct LibraryView: View {
                     return
                 }
                 let score = Quantizer.quantize(events)
-                _ = library.addTake(title: url.deletingPathExtension().lastPathComponent,
-                                    score: score)
+                saveImportedScore(score, title: url.deletingPathExtension().lastPathComponent)
             } catch {
                 library.postNotice("Could not read that MIDI file.")
             }
@@ -182,7 +220,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that video's audio.")
                 } else {
-                    _ = library.addTake(score: score)
+                    saveImportedScore(score)
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
