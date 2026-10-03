@@ -26,10 +26,10 @@ final class ProStore: ObservableObject {
     @Published private(set) var products: [Product] = []
     @Published private(set) var isPro: Bool = false
     @Published private(set) var isLoadingProducts = false
-    @Published private(set) var purchaseError: String?
+    @Published var purchaseError: String?
 
     private var updatesTask: Task<Void, Never>?
-    private let cache = EntitlementCache()
+    private var cache = EntitlementCache()
 
     init() {
         isPro = cache.isPro
