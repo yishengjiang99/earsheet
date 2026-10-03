@@ -1,0 +1,21 @@
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.build/
+*.ipa
+.env
+.env.*
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Core ML / ONNX weights fetched by scripts/fetch-models (pinned in models.lock)
+models/
+*.onnx
+*.mlpackage
+*.mlmodelc
+# SoundFonts are fetched by scripts/fetch-models; never commit them
+*.sf2
+Packages/HearSheet/.build/
+Packages/SF2Player/.build/
