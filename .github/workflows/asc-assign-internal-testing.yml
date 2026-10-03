@@ -6,6 +6,15 @@ on:
       build_number:
         required: true
         type: string
+      create_group:
+        description: Create internal group GROUP_NAME if missing and add the team users who can see this app as testers (create-only)
+        required: false
+        type: boolean
+        default: false
+      group_name:
+        required: false
+        type: string
+        default: Internal
 
 jobs:
   assign:
@@ -17,6 +26,8 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           BUILD_NUMBER: ${{ inputs.build_number }}
+          CREATE_GROUP: ${{ inputs.create_group }}
+          GROUP_NAME: ${{ inputs.group_name }}
           BUNDLE_ID: com.ragnus.pnge
         run: |
           set -euo pipefail
@@ -73,6 +84,50 @@ jobs:
           for g in groups.get('data', []):
             attrs = g['attributes']
             print('group', g['id'], attrs.get('name'), 'isInternal', attrs.get('isInternalGroup'), 'hasAccess', attrs.get('hasAccessToAllBuilds'))
+
+          if os.environ.get('CREATE_GROUP', '').lower() == 'true':
+            # Idempotent, create-only: never deletes groups or testers.
+            gname = (os.environ.get('GROUP_NAME') or 'Internal').strip()
+            grp = next((g for g in groups.get('data', []) if g['attributes'].get('isInternalGroup') and g['attributes'].get('name') == gname), None)
+            if grp:
+              print('internal group exists', grp['id'], gname)
+            else:
+              _, created = api('POST', '/v1/betaGroups', {'data': {'type': 'betaGroups',
+                'attributes': {'name': gname, 'isInternalGroup': True, 'hasAccessToAllBuilds': True},
+                'relationships': {'app': {'data': {'type': 'apps', 'id': app_id}}}}})
+              grp = created['data']
+              print('created internal group', grp['id'], gname, grp['attributes'])
+            gid = grp['id']
+            # Team users who can see this app
+            users, path = [], '/v1/users?limit=200'
+            while path:
+              _, page = api('GET', path)
+              users += page.get('data', [])
+              nxt = page.get('links', {}).get('next')
+              path = nxt.replace('https://api.appstoreconnect.apple.com', '') if nxt else None
+            _, existing = api('GET', f'/v1/betaGroups/{gid}/betaTesters?limit=200')
+            have = {t['attributes'].get('email', '').lower() for t in existing.get('data', [])}
+            for u in users:
+              a = u['attributes']
+              email = (a.get('username') or '').strip()
+              visible = a.get('allAppsVisible')
+              if not visible:
+                _, va = api('GET', f"/v1/users/{u['id']}/visibleApps?limit=200")
+                visible = any(x['id'] == app_id for x in va.get('data', []))
+              print('user', a.get('firstName'), a.get('lastName'), email, 'roles', a.get('roles'), 'canSeeApp', bool(visible))
+              if not visible or not email:
+                continue
+              if email.lower() in have:
+                print('  already a tester in', gname)
+                continue
+              try:
+                st, t = api('POST', '/v1/betaTesters', {'data': {'type': 'betaTesters',
+                  'attributes': {'email': email, 'firstName': a.get('firstName') or '', 'lastName': a.get('lastName') or ''},
+                  'relationships': {'betaGroups': {'data': [{'type': 'betaGroups', 'id': gid}]}}}})
+                print('  added tester', email, st, t['data']['id'])
+              except SystemExit as e:
+                print('  add tester failed', email, e)
+            _, groups = api('GET', f'/v1/apps/{app_id}/betaGroups')
 
           # Assign to all internal groups that don't already have access to all builds
           for g in groups.get('data', []):
