@@ -1,4 +1,4 @@
-# iOS simulator build + app tests (incl. Gate-1 CoreML: Tests/Gate1StaffTokenMatchTests.swift).
+# iOS simulator build + EarSheet app tests (SmokeTests + the Core ML triad import test).
 name: iOS Simulator
 
 on:
@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths-ignore:
       # App Store listing, docs and ASC-only workflows/scripts are not app inputs (the app bundles
-      # fixtures/, Sources/, Packages/, never docs/). fixtures/samples/ode-to-joy.jpg IS bundled.
+      # Sources/, Packages/, Tests/ and models/ via scripts/fetch-models; never docs/).
       - "docs/**"
       - "**/*.md"
       - "scripts/asc/**"
@@ -18,11 +18,6 @@ on:
       - "scripts/asc/**"
       - ".github/workflows/asc-*.yml"
   workflow_dispatch:
-    inputs:
-      oracle_pages:
-        description: "Also parse all 8 other homr oracle pages on the app path (~50 s each in Debug)"
-        type: boolean
-        default: false
 
 concurrency:
   group: ios-sim-${{ github.ref }}
@@ -76,13 +71,13 @@ jobs:
         env:
           # xcodebuild strips TEST_RUNNER_ and forwards to the simulator test process.
           TEST_RUNNER_OMR_MODELS_DIR: ${{ github.workspace }}/models
-          TEST_RUNNER_OMR_ORACLE_PAGES: ${{ inputs.oracle_pages && '1' || '0' }}
         run: |
           set -o pipefail
           xcodebuild test \
             -project EarSheet.xcodeproj \
             -scheme EarSheet \
             -only-testing:EarSheetTests/SmokeTests \
+            -only-testing:EarSheetTests/ImportTranscriptionTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
@@ -90,14 +85,12 @@ jobs:
 
       - name: HearSheet package tests (macOS)
         if: always()
-        continue-on-error: true
         run: |
           set -o pipefail
           swift test --package-path Packages/HearSheet 2>&1 | tee "$RUNNER_TEMP/hearsheet.log"
 
       - name: SF2Player package tests (macOS, gbk parity)
         if: always()
-        continue-on-error: true
         env:
           SF2PLAYER_SF2: ${{ github.workspace }}/models/GeneralUser-GS.sf2
         run: |
@@ -105,10 +98,10 @@ jobs:
           if [ ! -d Packages/SF2Player ]; then echo "SF2Player not vendored yet"; exit 0; fi
           swift test --package-path Packages/SF2Player 2>&1 | tee "$RUNNER_TEMP/sf2player.log"
 
-      - name: Gate-1 + warmup + page parse summary
+      - name: Test summary
         if: always()
         run: |
-          grep -E "Gate1StaffTokenMatchTests|Gate-1|ModelWarmupTests|Warmup:|PageRecognitionServiceTests|Gray8ImageTests|PageParse|OraclePages:|Gray8 parity|SegNetDiag|\[warmup\]|\[sf2\]|SF2PlayerAppTests|Build6PrepTests|SegNetSelfTest|coreml cache|Bundled ONNX|models not bundled" "$RUNNER_TEMP/xcodebuild.log" || echo "no Gate-1 / warmup lines"
+          grep -E "SmokeTests|ImportTranscriptionTests|Bundled models|models not bundled" "$RUNNER_TEMP/xcodebuild.log" || echo "no EarSheet test lines"
           if grep -F "should not be called on the main thread" "$RUNNER_TEMP/xcodebuild.log"; then
             echo "::warning::CoreML main-thread warning present"
           else

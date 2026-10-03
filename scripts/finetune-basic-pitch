@@ -2,45 +2,48 @@
 """Fine-tune Basic Pitch on this Mac, then write a Core ML bundle the iOS app can fetch.
 
 The upstream trainer (basic_pitch/train.py) always builds a fresh model. This script
-loads the ICASSP 2022 weights, fits on paired wav+midi, and exports BasicPitchPoly.mlpackage.
+loads the ICASSP 2022 weights, fits on paired wav+midi, evaluates against the frozen
+checkpoint (and the real phone-mic gate when provided), and exports
+BasicPitchPoly.mlpackage only if the prompt's ship rule passes.
 
 It does not commit weights. It writes:
-  build/finetune/<stamp>/model.best
-  build/BasicPitchPoly.mlpackage
-  models.lock   (sha256 line; models/ stays gitignored)
+  build/finetune/<stamp>/{train,val}.tfrecord   serialized pairs (source=synthetic_sf2)
+  build/finetune/<stamp>/model.best             fine-tuned SavedModel
+  build/finetune/metrics.json                   both eval tables + the ship decision
+  build/BasicPitchPoly.mlpackage                exported Core ML package (on ship)
 
 Usage:
-  scripts/finetune-basic-pitch --pairs ~/earsheet-data/train --val ~/earsheet-data/val
   scripts/finetune-basic-pitch --smoke
+  scripts/finetune-basic-pitch --pairs ~/earsheet-data/train --val ~/earsheet-data/val \\
+      [--mic-gate ~/earsheet-data/mic] [--epochs 8] [--lr 1e-4]
+
+Pairs are basename.wav + basename.mid. WAVs must be 22050 Hz mono 16-bit PCM
+(basic_pitch 0.4.0 asserts AUDIO_N_CHANNELS == 1 at serialization; the prompt's
+"stereo" wording does not match the code, so mono is required and documented here).
+MIDI is parsed with pretty_midi (a basic-pitch dependency).
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "finetune"
 PACKAGE_NAME = "BasicPitchPoly.mlpackage"
-LOCK = ROOT / "models.lock"
+SOURCE_TAG = "synthetic_sf2"
 EXPECTED_IN = (1, 43844, 1)
 EXPECTED_OUT = {"note": 88, "onset": 88, "contour": 264}
+ONSET_TOLERANCE = 0.05  # 50 ms, per the prompt
 
 
-def sha256_dir(path: Path) -> str:
-    digest = hashlib.sha256()
-    for p in sorted(path.rglob("*")):
-        if p.is_file():
-            digest.update(p.relative_to(path).as_posix().encode())
-            digest.update(p.read_bytes())
-    return digest.hexdigest()
-
+# ---------------------------------------------------------------- smoke
 
 def smoke() -> int:
     print(f"machine {platform.platform()} {platform.machine()}")
@@ -61,6 +64,136 @@ def smoke() -> int:
     return 0
 
 
+# ------------------------------------------------------- serialization
+
+def read_pairs(pairs_dir: Path):
+    """Yield (stem, wav_path, mid_path) for basename.wav + basename.mid pairs."""
+    wavs = {p.stem: p for p in pairs_dir.glob("*.wav")}
+    mids = {p.stem: p for p in pairs_dir.glob("*.mid")}
+    for stem in sorted(set(wavs) & set(mids)):
+        yield stem, wavs[stem], mids[stem]
+
+
+def wav_seconds(wav_path: Path) -> float:
+    try:
+        w = wave.open(str(wav_path), "rb")
+    except (wave.Error, EOFError) as e:
+        raise SystemExit(f"{wav_path}: not a readable WAV ({e})")
+    with w:
+        if w.getframerate() != 22050 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+            raise SystemExit(
+                f"{wav_path}: need 22050 Hz mono 16-bit PCM "
+                f"(got {w.getframerate()} Hz, {w.getnchannels()} ch, {w.getsampwidth() * 8}-bit)"
+            )
+        return w.getnframes() / float(w.getframerate())
+
+
+def midi_notes(mid_path: Path):
+    """(start_s, end_s, midi, velocity) from a MIDI file, drums skipped."""
+    import pretty_midi
+
+    pm = pretty_midi.PrettyMIDI(str(mid_path))
+    out = []
+    for inst in pm.instruments:
+        if inst.is_drum:
+            continue
+        for n in inst.notes:
+            if n.end <= n.start:
+                continue
+            out.append((float(n.start), float(n.end), int(n.pitch), int(n.velocity)))
+    return out
+
+
+def serialize_split(stems_and_paths, tfrecord_path: Path) -> list[str]:
+    """Serialize pairs with basic_pitch's TFExample contract. Returns stems."""
+    import numpy as np
+    from basic_pitch.constants import (
+        ANNOTATION_HOP,
+        AUDIO_SAMPLE_RATE,
+        FREQ_BINS_CONTOURS,
+        N_FREQ_BINS_CONTOURS,
+        N_FREQ_BINS_NOTES,
+    )
+    from basic_pitch.data.tf_example_serialization import _to_transcription_tfex
+
+    contour_bins = np.asarray(FREQ_BINS_CONTOURS, dtype=np.float64)
+    stems = []
+    with tf_record_writer(tfrecord_path) as writer:
+        for stem, wav_path, mid_path in stems_and_paths:
+            duration = wav_seconds(wav_path)  # validates format too
+            notes = midi_notes(mid_path)
+            if not notes:
+                print(f"  skip {stem}: no notes in {mid_path.name}")
+                continue
+            time_scale = np.arange(0, duration + ANNOTATION_HOP, ANNOTATION_HOP)
+            n_frames = len(time_scale)
+
+            note_idx, note_val = [], []
+            on_idx, on_val = [], []
+            con_idx, con_val = [], []
+            for start, end, pitch, _vel in notes:
+                if not 21 <= pitch <= 108:
+                    continue
+                f = pitch - 21
+                s = int(np.clip(round(start / ANNOTATION_HOP), 0, n_frames - 1))
+                e = int(np.clip(round(end / ANNOTATION_HOP), s + 1, n_frames))
+                hz = 440.0 * (2.0 ** ((pitch - 69) / 12.0))
+                cb = int(np.argmin(np.abs(contour_bins - hz)))
+                for t in range(s, e):
+                    note_idx.append((t, f))
+                    note_val.append(1.0)
+                    con_idx.append((t, cb))
+                    con_val.append(1.0)
+                # Onset target: the single onset frame (mirdata onsets_only convention).
+                on_idx.append((s, f))
+                on_val.append(1.0)
+
+            ex = _to_transcription_tfex(
+                stem,
+                SOURCE_TAG,
+                open(wav_path, "rb").read(),
+                note_idx,
+                note_val,
+                on_idx,
+                on_val,
+                con_idx,
+                con_val,
+                (n_frames, N_FREQ_BINS_NOTES),
+                (n_frames, N_FREQ_BINS_CONTOURS),
+            )
+            writer.write(ex.SerializeToString())
+            stems.append(stem)
+    print(f"  wrote {tfrecord_path} ({len(stems)} pairs)")
+    return stems
+
+
+def tf_record_writer(path: Path):
+    import tensorflow as tf
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return tf.io.TFRecordWriter(str(path))
+
+
+# ------------------------------------------------------------- datasets
+
+def make_dataset(tfrecord_path: Path, n_windows_per_track: int, batch: int, training: bool):
+    import tensorflow as tf
+    from basic_pitch.data import tf_example_deserialization as deser
+
+    def file_gen():
+        yield str(tfrecord_path)
+
+    ds = deser.transcription_dataset(
+        file_gen, n_samples_per_track=n_windows_per_track, random_seed=training
+    )
+    if training:
+        ds = ds.shuffle(512)
+    ds = ds.batch(batch).prefetch(tf.data.AUTOTUNE)
+    return ds
+
+
+# ------------------------------------------------------- weight loading
+
 def load_pretrained(model):
     import tensorflow as tf
     from basic_pitch import ICASSP_2022_MODEL_PATH
@@ -75,90 +208,385 @@ def load_pretrained(model):
     raise SystemExit(f"ICASSP weights not a Keras model at {path}; refuse to train from scratch")
 
 
-def export_coreml(keras_model, dest: Path) -> None:
-    import coremltools as ct
+def set_harmonic_stacking_trainable(model, trainable: bool) -> None:
+    """HarmonicStacking is constructed trainable=False with no weights, so
+    freezing/unfreezing is a no-op by construction; log it instead of failing."""
     import tensorflow as tf
 
-    # Stock Basic Pitch consumes a harmonic-stacked CQT, not raw audio.
-    # The iOS contract is raw waveform [1, 43844, 1]. Refuse a silent shape change.
+    found = [l for l in model.layers if "harmonic_stacking" in l.name]
+    for l in found:
+        l.trainable = trainable
+    print(f"harmonic_stacking layers: {[l.name for l in found]} "
+          f"(trainable={trainable}; layer holds no weights)")
+
+
+# ------------------------------------------------------------------ eval
+
+def reference_notes(mid_path: Path):
+    """(intervals, pitches) for mir_eval from a MIDI file."""
+    import numpy as np
+
+    notes = midi_notes(mid_path)
+    intervals = np.array([[s, e] for s, e, _, _ in notes])
+    pitches = np.array([float(midi_to_hz(p)) for _, _, p, _ in notes])
+    return intervals, pitches
+
+
+def midi_to_hz(midi: int) -> float:
+    return 440.0 * (2.0 ** ((midi - 69) / 12.0))
+
+
+def predict_notes(model_or_path, wav_path: Path):
+    """Note events via basic_pitch's own inference + decoder."""
+    from basic_pitch import inference
+
+    _out, _midi_data, note_events = inference.predict(str(wav_path), model_or_path)
+    return note_events  # [(start, end, pitch, amplitude, bends|None)]
+
+
+def note_f1(ref_intervals, ref_pitches, est_events) -> float:
+    import numpy as np
+    import mir_eval
+
+    if not len(est_events):
+        return 0.0
+    est_intervals = np.array([[s, e] for s, e, _, _, _ in est_events])
+    est_pitches = np.array([midi_to_hz(int(p)) for _, _, p, _, _ in est_events])
+    _p, _r, f = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_intervals,
+        ref_pitches,
+        est_intervals,
+        est_pitches,
+        onset_tolerance=ONSET_TOLERANCE,
+        offset_ratio=None,  # onset-only note F1 per the prompt's 50 ms rule
+    )
+    return float(f)
+
+
+def evaluate_model(model_or_path, pairs) -> dict:
+    """Per-clip note F1 plus the mean, for (stem, wav, mid) pairs."""
+    f1s = {}
+    for stem, wav_path, mid_path in pairs:
+        ref_i, ref_p = reference_notes(mid_path)
+        if len(ref_i) == 0:
+            continue
+        est = predict_notes(model_or_path, wav_path)
+        f1s[stem] = round(note_f1(ref_i, ref_p, est), 4)
+    mean = round(sum(f1s.values()) / len(f1s), 4) if f1s else 0.0
+    return {"mean_f1": mean, "clips": f1s, "n_clips": len(f1s)}
+
+
+class NoteF1EarlyStopping:
+    """Stop when val note-F1 (mir_eval, 50 ms) stops improving. Keeps the
+    weights from the best-F1 epoch. Evaluation runs in a subprocess so the
+    training session is never disturbed."""
+
+    def __init__(self, keras_model, val_dir: Path, best_weights_path: Path,
+                 eval_json: Path, patience: int, eval_every: int = 1):
+        self.keras_model = keras_model
+        self.val_dir = val_dir
+        self.best_weights_path = best_weights_path
+        self.eval_json = eval_json
+        self.patience = patience
+        self.eval_every = eval_every
+        self.best = -1.0
+        self.bad = 0
+        self.best_epoch = 0
+        self.stopped_epoch = None
+
+    def on_epoch_end(self, epoch: int, saved_model_dir: Path) -> bool:
+        if (epoch + 1) % self.eval_every != 0:
+            return False
+        self.keras_model.save(str(saved_model_dir))
+        r = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--eval-only",
+             "--savedmodel", str(saved_model_dir),
+             "--val", str(self.val_dir),
+             "--out", str(self.eval_json)],
+            capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  [val-f1] eval subprocess failed:\n{r.stderr[-2000:]}")
+            return False
+        f1 = json.loads(self.eval_json.read_text())["mean_f1"]
+        print(f"  [val-f1] epoch {epoch + 1}: note F1 {f1:.4f} (best {self.best:.4f})")
+        if f1 > self.best + 1e-4:
+            self.best = f1
+            self.bad = 0
+            self.best_epoch = epoch + 1
+            self.keras_model.save_weights(str(self.best_weights_path))
+        else:
+            self.bad += 1
+        if self.bad >= self.patience:
+            self.stopped_epoch = epoch + 1
+            return True
+        return False
+
+
+# ---------------------------------------------------------------- export
+
+def export_coreml(keras_model, dest: Path, val_pairs, tf_savedmodel_dir: Path) -> Path:
+    """Convert to Core ML, fp16 first; fall back to fp32 if the 5-clip
+    TensorFlow-vs-CoreML note comparison fails. Returns the shipped package."""
+    import coremltools as ct
+
     spec_in = getattr(keras_model, "input_shape", None)
     print(f"keras input_shape {spec_in}")
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    def convert(precision) -> Path:
+        out = dest.parent / (dest.stem + (".fp16" if precision == ct.precision.FLOAT16 else ".fp32"))
+        if out.exists():
+            shutil.rmtree(out)
+        ml = ct.convert(
+            keras_model,
+            convert_to="mlprogram",
+            compute_precision=precision,
+            minimum_deployment_target=ct.target.iOS17,
+        )
+        ml.save(str(out))
+        return out
+
+    def gate(package: Path) -> bool:
+        """Shape gate + 5-clip note comparison against TensorFlow."""
+        import numpy as np
+        from basic_pitch import inference
+
+        ml = ct.models.MLModel(str(package))
+        spec = ml.get_spec()
+        in_desc = spec.description.input[0]
+        shape = tuple(in_desc.type.multiArrayType.shape)
+        outs = {
+            o.name: tuple(o.type.multiArrayType.shape) for o in spec.description.output
+        }
+        print(f"  coreml input {in_desc.name} {shape}; outputs {outs}")
+        if tuple(shape) != tuple(EXPECTED_IN):
+            print(f"  REFUSE: input shape {shape} != {EXPECTED_IN}")
+            return False
+        out_shapes = sorted(outs.values())
+        want = sorted([(1, 172, 88), (1, 172, 88), (1, 172, 264)])
+        if out_shapes != want:
+            print(f"  REFUSE: output shapes {out_shapes} != {want}")
+            return False
+
+        # 5-clip note comparison: Core ML notes must equal TensorFlow notes.
+        tf_model = inference.Model(str(tf_savedmodel_dir))
+        cm_model = inference.Model(str(package))
+        clips = val_pairs[:5]
+        for stem, wav_path, _mid in clips:
+            tf_notes = {(round(s, 2), round(e, 2), int(p)) for s, e, p, _, _ in predict_notes(tf_model, wav_path)}
+            cm_notes = {(round(s, 2), round(e, 2), int(p)) for s, e, p, _, _ in predict_notes(cm_model, wav_path)}
+            if tf_notes != cm_notes:
+                print(f"  MISMATCH on {stem}: tf={len(tf_notes)} notes coreml={len(cm_notes)} notes")
+                return False
+            print(f"  match on {stem} ({len(tf_notes)} notes)")
+        return True
+
+    if platform.system() != "Darwin":
+        raise SystemExit("Core ML prediction needs macOS; export on the MacBook")
+
+    fp16 = convert(ct.precision.FLOAT16)
+    if gate(fp16):
+        print("fp16 notes match TensorFlow; shipping fp16")
+        chosen = fp16
+    else:
+        print("fp16 mismatch; trying fp32")
+        fp32 = convert(ct.precision.FLOAT32)
+        if not gate(fp32):
+            raise SystemExit("REFUSE: fp32 Core ML notes differ from TensorFlow; not shipping")
+        print("fp32 notes match TensorFlow; shipping fp32")
+        chosen = fp32
+
     if dest.exists():
         shutil.rmtree(dest)
-    ml = ct.convert(
-        keras_model,
-        convert_to="mlprogram",
-        compute_precision=ct.precision.FLOAT16,
-        minimum_deployment_target=ct.target.iOS17,
-    )
-    ml.save(str(dest))
-    spec = ml.get_spec()
-    print(f"wrote {dest}")
-    # Shape gate: if conversion did not produce the app contract, do not lock it.
-    blob = dest.as_posix()
+    shutil.move(str(chosen), str(dest))
+    for leftover in dest.parent.glob(dest.stem + ".fp*"):
+        if leftover != dest and leftover.is_dir():
+            shutil.rmtree(leftover)
+    spec = ct.models.MLModel(str(dest)).get_spec()
     note = dest.with_suffix(".contract.json")
     note.write_text(json.dumps({
-        "package": blob,
+        "package": dest.as_posix(),
         "expected_input": list(EXPECTED_IN),
         "expected_outputs": EXPECTED_OUT,
         "keras_input_shape": str(spec_in),
         "coreml_description": spec.description.metadata.shortDescription if spec.description.HasField("metadata") else "",
     }, indent=2))
+    print(f"wrote {dest}")
     print(f"contract note {note}")
-    print("App bundle step copies this package only after the iOS decoder accepts its inputs.")
+    return dest
 
 
-def write_lock(package: Path) -> None:
-    digest = sha256_dir(package)
-    rel = package.relative_to(ROOT).as_posix()
-    LOCK.write_text(
-        "# local fine-tune. Not committed as weights. fetch-models copies this path.\n"
-        f"local {rel} sha256:{digest}\n"
-    )
-    print(f"models.lock -> {rel} {digest}")
+# ------------------------------------------------------------------ main
+
+def eval_only(args) -> int:
+    """Subprocess entry: note-F1 of a SavedModel dir on --val pairs -> --out JSON."""
+    if not args.savedmodel or not args.val or not args.out:
+        raise SystemExit("--eval-only needs --savedmodel, --val and --out")
+    if smoke() != 0:
+        return 1
+    from basic_pitch import inference
+
+    pairs = list(read_pairs(args.val))
+    if not pairs:
+        raise SystemExit(f"no wav+mid pairs in {args.val}")
+    table = evaluate_model(inference.Model(str(args.savedmodel)), pairs)
+    args.out.write_text(json.dumps(table, indent=2))
+    print(json.dumps({"mean_f1": table["mean_f1"], "n_clips": table["n_clips"]}))
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fine-tune Basic Pitch and export Core ML")
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--pairs", type=Path, help="Directory of basename.wav + basename.mid")
-    parser.add_argument("--val", type=Path, help="Validation pairs")
+    parser.add_argument("--pairs", type=Path, help="Directory of basename.wav + basename.mid (train)")
+    parser.add_argument("--val", type=Path, help="Validation pairs (wav+mid)")
+    parser.add_argument("--mic-gate", type=Path, default=None,
+                        help="Real phone-mic gate: wav+mid pairs never trained on (>=30 clips to ship)")
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch", type=int, default=8)
+    parser.add_argument("--windows-per-track", type=int, default=8,
+                        help="Random AUDIO_N_SAMPLES windows sampled per track per epoch")
+    parser.add_argument("--patience", type=int, default=8)
+    parser.add_argument("--max-epochs", type=int, default=40)
+    # Internal: evaluate a SavedModel dir on --val pairs, write F1 JSON to --out.
+    parser.add_argument("--eval-only", action="store_true")
+    parser.add_argument("--savedmodel", type=Path, default=None)
+    parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.eval_only:
+        return eval_only(args)
+
     if args.smoke or not args.pairs:
         return smoke()
-    if not args.pairs.is_dir():
-        raise SystemExit(f"missing pairs dir {args.pairs}")
+    for d, label in ((args.pairs, "--pairs"), (args.val, "--val")):
+        if d is None or not d.is_dir():
+            raise SystemExit(f"missing {label} dir {d}")
+    if args.mic_gate is not None and not args.mic_gate.is_dir():
+        raise SystemExit(f"missing --mic-gate dir {args.mic_gate}")
     os.chdir(ROOT)
-    code = smoke()
-    if code != 0:
-        return code
+    if smoke() != 0:
+        return 1
+
     import tensorflow as tf
-    from basic_pitch import models
+    from basic_pitch import ICASSP_2022_MODEL_PATH, models
     from basic_pitch.models import loss
 
+    train_pairs = list(read_pairs(args.pairs))
+    val_pairs = list(read_pairs(args.val))
+    if not train_pairs:
+        raise SystemExit(f"no wav+mid pairs in {args.pairs}")
+    if not val_pairs:
+        raise SystemExit(f"no wav+mid pairs in {args.val}")
+    mic_pairs = list(read_pairs(args.mic_gate)) if args.mic_gate else []
+    print(f"pairs: train={len(train_pairs)} val={len(val_pairs)} mic_gate={len(mic_pairs)}")
+
+    stamp = BUILD / str(int(tf.timestamp().numpy()))
+    stamp.mkdir(parents=True, exist_ok=True)
+    train_tfr = stamp / "train.tfrecord"
+    val_tfr = stamp / "val.tfrecord"
+    print("serializing TFRecords (source=synthetic_sf2, 22050 Hz mono)...")
+    train_stems = serialize_split(train_pairs, train_tfr)
+    val_stems = serialize_split(val_pairs, val_tfr)
+    (stamp / "pairs.json").write_text(json.dumps(
+        {"train": train_stems, "val": val_stems,
+         "mic_gate": [s for s, _, _ in mic_pairs]}, indent=2))
+    if not train_stems or not val_stems:
+        raise SystemExit("no usable pairs after serialization")
+
+    print("building datasets...")
+    train_ds = make_dataset(train_tfr, args.windows_per_track, args.batch, training=True)
+    val_ds = make_dataset(val_tfr, max(1, args.windows_per_track // 2), args.batch, training=False)
+
+    print("loading ICASSP 2022 weights into models.model()...")
     model = models.model(no_contours=False)
     model = load_pretrained(model)
-    model.compile(optimizer=tf.keras.optimizers.Adam(args.lr), loss=loss(weighted=True, positive_weight=0.95))
-    stamp = tf.timestamp().numpy()
-    out = BUILD / f"{int(stamp)}"
-    out.mkdir(parents=True, exist_ok=True)
-    # Data pipeline is the Spotify TFExample contract. This entry refuses unlabeled audio.
-    wavs = list(args.pairs.glob("*.wav"))
-    mids = {p.stem for p in args.pairs.glob("*.mid")}
-    paired = [p for p in wavs if p.stem in mids]
-    if not paired:
-        raise SystemExit(f"no wav+mid pairs in {args.pairs}")
-    print(f"pairs {len(paired)} epochs {args.epochs} lr {args.lr}")
-    print("TFExample build is phase-B of prompts/finetune-bundle.md. Refusing to fit without serialized splits.")
-    manifest = out / "pairs.json"
-    manifest.write_text(json.dumps([p.stem for p in paired], indent=2))
-    model.save(out / "model.loaded")
-    print(f"pretrained snapshot {out / 'model.loaded'}")
-    print("Next: serialize pairs with basic_pitch.data.tf_example_serialization, then fit, then --export.")
+
+    # Stage A: 2 epochs at --lr with harmonic stacking frozen (vacuous: the
+    # layer is constructed trainable=False and holds no weights).
+    set_harmonic_stacking_trainable(model, False)
+    model.compile(optimizer=tf.keras.optimizers.Adam(args.lr),
+                  loss=loss(label_smoothing=0.2, weighted=True, positive_weight=0.95))
+    stage_a = min(2, args.epochs)
+    print(f"stage A: {stage_a} epoch(s) at lr={args.lr} (harmonic stacking frozen)")
+    model.fit(train_ds, validation_data=val_ds, epochs=stage_a)
+
+    # Stage B: unfreeze, drop to 1e-5, early-stop on val note-F1.
+    set_harmonic_stacking_trainable(model, True)
+    model.compile(optimizer=tf.keras.optimizers.Adam(1e-5),
+                  loss=loss(label_smoothing=0.2, weighted=True, positive_weight=0.95))
+    best_dir = stamp / "model.best"
+    best_weights = stamp / "best_weights.ckpt"
+    eval_json = stamp / "val_f1.json"
+    stopper = NoteF1EarlyStopping(model, args.val, best_weights, eval_json,
+                                 patience=args.patience)
+    print(f"stage B: up to {args.max_epochs - stage_a} epoch(s) at lr=1e-5, "
+          f"early stop on val note-F1 (patience {args.patience})")
+    remaining = args.max_epochs - stage_a
+    for epoch in range(remaining):
+        model.fit(train_ds, validation_data=val_ds, epochs=1)
+        if stopper.on_epoch_end(stage_a + epoch, best_dir):
+            print(f"early stopping at epoch {stopper.stopped_epoch}")
+            break
+    print(f"best val note-F1 {stopper.best:.4f} at epoch {stopper.best_epoch}")
+    if best_weights.exists():
+        model.load_weights(str(best_weights))
+        print("restored best-F1 weights")
+    model.save(str(best_dir))
+
+    # ---- eval: fine-tuned vs frozen ICASSP checkpoint, synthetic + mic gate
+    from basic_pitch import inference
+
+    print("evaluating (mir_eval, 50 ms onset tolerance)...")
+    tuned = inference.Model(str(best_dir))
+    frozen = inference.Model(str(ICASSP_2022_MODEL_PATH))
+    tuned_val = evaluate_model(tuned, val_pairs)
+    frozen_val = evaluate_model(frozen, val_pairs)
+    tuned_mic = evaluate_model(tuned, mic_pairs) if mic_pairs else None
+    frozen_mic = evaluate_model(frozen, mic_pairs) if mic_pairs else None
+
+    ship = (
+        tuned_val["mean_f1"] >= frozen_val["mean_f1"]
+        and tuned_mic is not None
+        and tuned_mic["n_clips"] >= 30
+        and tuned_mic["mean_f1"] >= frozen_mic["mean_f1"] - 0.02
+    )
+    metrics = {
+        "stamp": stamp.name,
+        "train_stems": train_stems,
+        "synthetic_val": {"tuned": tuned_val, "frozen_icassp": frozen_val},
+        "real_mic_gate": {"tuned": tuned_mic, "frozen_icassp": frozen_mic},
+        "ship_rule": {
+            "synthetic_val_f1_at_least_stock": tuned_val["mean_f1"] >= frozen_val["mean_f1"],
+            "mic_clips": tuned_mic["n_clips"] if tuned_mic else 0,
+            "mic_f1_within_2pts": (
+                tuned_mic["mean_f1"] >= frozen_mic["mean_f1"] - 0.02) if tuned_mic else False,
+            "ship": ship,
+        },
+    }
+    metrics_path = BUILD / "metrics.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2))
+    print(f"metrics -> {metrics_path}")
+    print(f"synthetic val F1: tuned {tuned_val['mean_f1']:.4f} vs stock {frozen_val['mean_f1']:.4f}")
+    if tuned_mic:
+        print(f"real-mic F1: tuned {tuned_mic['mean_f1']:.4f} vs stock {frozen_mic['mean_f1']:.4f} "
+              f"({tuned_mic['n_clips']} clips)")
+    else:
+        print("real-mic gate: not provided (--mic-gate); cannot ship without it")
+
+    if not ship:
+        print("SHIP RULE FAILED (or mic gate missing): stock weights stay. "
+              "models.lock untouched.")
+        return 2
+
+    # ---- ship: export Core ML, bundle, re-fetch
+    print("ship rule passed; exporting Core ML...")
+    package = export_coreml(model, BUILD / PACKAGE_NAME, val_pairs, best_dir)
+    r = subprocess.run(["scripts/bundle-coreml", str(package)], check=False)
+    if r.returncode != 0:
+        raise SystemExit("scripts/bundle-coreml failed")
+    print("bundled. Run scripts/fetch-models (Xcode does this) to verify the pin.")
     return 0
 
 

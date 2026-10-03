@@ -1,0 +1,1 @@
+{"description":"Expected SMF note ticks for the C-major triad fixture: C4/E4/G4, quarter notes at 120 BPM, 4/4, 480 TPQ.","notes":[{"endTick":480,"midi":60,"startTick":0},{"endTick":480,"midi":64,"startTick":0},{"endTick":480,"midi":67,"startTick":0}],"ticksPerQuarter":480}
