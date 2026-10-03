@@ -172,5 +172,63 @@ public enum AudioImport {
     public enum ImportError: Error, Equatable {
         case durationLimitExceeded
         case conversionFailed
+        case noAudioTrack
+    }
+
+    /// Extracts the audio track of a video asset (e.g. from the Photos
+    /// library), resampled to 22050 Hz mono float32 by the reader itself.
+    /// No intermediate file and no lossy transcode.
+    public static func loadMono22050(asset: AVAsset,
+                                    maxSamples: Int = AudioRecorder.maxSamples) throws -> [Float] {
+        guard asset.tracks(withMediaType: .audio).first != nil else {
+            throw ImportError.noAudioTrack
+        }
+        let sampleLimit = min(maxSamples, AudioRecorder.maxSamples)
+        guard sampleLimit > 0 else { throw ImportError.durationLimitExceeded }
+        let seconds = CMTimeGetSeconds(asset.duration)
+        guard seconds.isFinite,
+              seconds <= Double(sampleLimit) / AudioRecorder.targetSampleRate else {
+            throw ImportError.durationLimitExceeded
+        }
+        guard let track = asset.tracks(withMediaType: .audio).first else {
+            throw ImportError.noAudioTrack
+        }
+        let reader: AVAssetReader
+        do {
+            reader = try AVAssetReader(asset: asset)
+        } catch {
+            throw ImportError.conversionFailed
+        }
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: AudioRecorder.targetSampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+        ])
+        guard reader.canAdd(output) else { throw ImportError.conversionFailed }
+        reader.add(output)
+        guard reader.startReading() else { throw ImportError.conversionFailed }
+
+        var out: [Float] = []
+        out.reserveCapacity(min(sampleLimit, Int(seconds * AudioRecorder.targetSampleRate)))
+        while out.count < sampleLimit, let sample = output.copyNextSampleBuffer() {
+            defer { CMSampleBufferInvalidate(sample) }
+            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            var length = 0
+            var pointer: UnsafeMutablePointer<Int8>?
+            guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil,
+                                              totalLengthOut: &length,
+                                              dataPointerOut: &pointer) == kCMBlockBufferNoErr,
+                  let base = pointer else { continue }
+            let count = min(length / MemoryLayout<Float>.size, sampleLimit - out.count)
+            guard count > 0 else { break }
+            base.withMemoryRebound(to: Float.self, capacity: count) { floats in
+                out.append(contentsOf: UnsafeBufferPointer(start: floats, count: count))
+            }
+        }
+        if reader.status == .failed { throw ImportError.conversionFailed }
+        return out
     }
 }
