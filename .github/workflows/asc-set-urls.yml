@@ -1,0 +1,99 @@
+name: ASC set support/privacy URLs
+
+# Sets AI Music Radar (ASC app 6818838017) URLs: appInfoLocalizations.privacyPolicyUrl on the
+# editable app info, and appStoreVersionLocalizations.supportUrl (+ optional marketingUrl) on the
+# editable App Store version. Updates/creates only; deletes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      locale:
+        required: false
+        type: string
+        default: en-US
+      support_url:
+        required: false
+        type: string
+        default: https://grepawk.com/music-radar/support
+      privacy_url:
+        required: false
+        type: string
+        default: https://grepawk.com/music-radar/privacy
+      marketing_url:
+        description: Optional; empty leaves it unchanged
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  set-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set URLs
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          ASC_APP_ID: "6818838017"
+          LOCALE: ${{ inputs.locale }}
+          SUPPORT_URL: ${{ inputs.support_url }}
+          PRIVACY_URL: ${{ inputs.privacy_url }}
+          MARKETING_URL: ${{ inputs.marketing_url }}
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography
+          python3 <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          import jwt
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          token = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200,
+                              'aud': 'appstoreconnect-v1'}, p8, algorithm='ES256',
+                             headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          def api(method, path, body=None):
+            req = urllib.request.Request('https://api.appstoreconnect.apple.com' + path, method=method,
+                                         data=None if body is None else json.dumps(body).encode(),
+                                         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+            try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read().decode() or '{}')
+            except urllib.error.HTTPError as e:
+              raise SystemExit(f'{method} {path} -> {e.code}: {e.read().decode()[:1500]}')
+          app, loc = os.environ['ASC_APP_ID'], os.environ['LOCALE'].strip()
+          sup, pri, mkt = os.environ['SUPPORT_URL'].strip(), os.environ['PRIVACY_URL'].strip(), os.environ['MARKETING_URL'].strip()
+          LIVE = {'READY_FOR_DISTRIBUTION', 'READY_FOR_SALE', 'REPLACED_WITH_NEW_INFO', 'REMOVED_FROM_SALE'}
+
+          # App info (privacy policy URL)
+          _, infos = api('GET', f'/v1/apps/{app}/appInfos')
+          for info in infos['data']:
+            a = info['attributes']; state = a.get('state') or a.get('appStoreState')
+            print('appInfo', info['id'], state)
+            if state in LIVE:
+              continue
+            _, ls = api('GET', f"/v1/appInfos/{info['id']}/appInfoLocalizations?limit=50")
+            l = next((x for x in ls['data'] if x['attributes']['locale'] == loc), None)
+            if not l:
+              print('  no', loc, 'appInfoLocalization; locales:', [x['attributes']['locale'] for x in ls['data']]); continue
+            st, r = api('PATCH', f"/v1/appInfoLocalizations/{l['id']}", {'data': {'type': 'appInfoLocalizations', 'id': l['id'], 'attributes': {'privacyPolicyUrl': pri}}})
+            ra = r['data']['attributes']
+            print('  appInfoLocalization', loc, st, 'name=', ra.get('name'), 'subtitle=', ra.get('subtitle'), 'privacyPolicyUrl=', ra.get('privacyPolicyUrl'))
+
+          # App Store version (support / marketing URL)
+          _, vers = api('GET', f'/v1/apps/{app}/appStoreVersions?filter[platform]=IOS&limit=20')
+          edit = [v for v in vers['data'] if v['attributes'].get('appStoreState') not in LIVE and v['attributes'].get('appVersionState') not in LIVE]
+          if not edit:
+            print('::warning::no editable App Store version; supportUrl not set (create the version first)')
+          for v in edit:
+            print('version', v['id'], v['attributes'].get('versionString'), v['attributes'].get('appStoreState'))
+            attrs = {'supportUrl': sup}
+            if mkt: attrs['marketingUrl'] = mkt
+            _, ls = api('GET', f"/v1/appStoreVersions/{v['id']}/appStoreVersionLocalizations?limit=50")
+            l = next((x for x in ls['data'] if x['attributes']['locale'] == loc), None)
+            if l:
+              st, r = api('PATCH', f"/v1/appStoreVersionLocalizations/{l['id']}", {'data': {'type': 'appStoreVersionLocalizations', 'id': l['id'], 'attributes': attrs}})
+            else:
+              st, r = api('POST', '/v1/appStoreVersionLocalizations', {'data': {'type': 'appStoreVersionLocalizations', 'attributes': {'locale': loc, **attrs},
+                          'relationships': {'appStoreVersion': {'data': {'type': 'appStoreVersions', 'id': v['id']}}}}})
+            ra = r['data']['attributes']
+            print('  versionLocalization', loc, st, 'supportUrl=', ra.get('supportUrl'), 'marketingUrl=', ra.get('marketingUrl'))
+          PY

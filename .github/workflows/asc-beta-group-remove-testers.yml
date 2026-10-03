@@ -1,0 +1,71 @@
+name: ASC remove testers from a beta group
+
+# Removes the listed emails from ONE beta group of AI Music Radar (ASC app 6818838017) only.
+# Uses DELETE /v1/betaGroups/{id}/relationships/betaTesters: the testers' team accounts,
+# other groups and other apps are untouched. KEEP_EMAILS are never removed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      group_id:
+        required: true
+        type: string
+      emails:
+        description: Comma-separated tester emails to remove from that group
+        required: true
+        type: string
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove testers from group
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          ASC_APP_ID: "6818838017"
+          GROUP_ID: ${{ inputs.group_id }}
+          EMAILS: ${{ inputs.emails }}
+          KEEP_EMAILS: yisheng.jiang@gmail.com,yisheng@fundrx.co
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography
+          python3 <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          import jwt
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          token = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200,
+                              'aud': 'appstoreconnect-v1'}, p8, algorithm='ES256',
+                             headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          def api(method, path, body=None):
+            req = urllib.request.Request('https://api.appstoreconnect.apple.com' + path, method=method,
+                                         data=None if body is None else json.dumps(body).encode(),
+                                         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+            try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read().decode() or '{}')
+            except urllib.error.HTTPError as e:
+              raise SystemExit(f'{method} {path} -> {e.code}: {e.read().decode()[:1200]}')
+          gid = os.environ['GROUP_ID'].strip()
+          _, g = api('GET', f'/v1/betaGroups/{gid}?include=app')
+          app = g['data']['relationships']['app']['data']['id']
+          print('group', gid, g['data']['attributes'].get('name'), 'app', app)
+          if app != os.environ['ASC_APP_ID']:
+            raise SystemExit(f'group belongs to app {app}, not {os.environ["ASC_APP_ID"]}')
+          keep = {e.strip().lower() for e in os.environ['KEEP_EMAILS'].split(',') if e.strip()}
+          want = {e.strip().lower() for e in os.environ['EMAILS'].split(',') if e.strip()} - keep
+          def testers():
+            _, t = api('GET', f'/v1/betaGroups/{gid}/betaTesters?limit=200')
+            return t.get('data', [])
+          ids = [t['id'] for t in testers() if (t['attributes'].get('email') or '').lower() in want]
+          print('removing', len(ids), 'of', len(want), 'requested')
+          if ids:
+            st, _ = api('DELETE', f'/v1/betaGroups/{gid}/relationships/betaTesters',
+                        {'data': [{'type': 'betaTesters', 'id': i} for i in ids]})
+            print('DELETE relationship', st)
+          for t in testers():
+            a = t['attributes']
+            print('remaining', a.get('firstName'), a.get('lastName'), a.get('email'))
+          PY

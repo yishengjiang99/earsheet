@@ -12,3 +12,4 @@ ASC app record (App Store Connect → General Information), updated 2026-10-03:
 - Previous identity: EarSheet: Music to Sheet, com.ragnus.earsheet
 - Sibling: SheetCam, com.ragnus.vp, repo yishengjiang99/omr-sheet-cam
 - Platform: iOS/iPadOS 17+
+- Support: https://grepawk.com/music-radar/support · Privacy: https://grepawk.com/music-radar/privacy · Terms: https://grepawk.com/music-radar/terms (source docs/legal/music-radar, deploy with its deploy-grepawk.sh)
