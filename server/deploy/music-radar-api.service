@@ -1,0 +1,23 @@
+[Unit]
+Description=AI Music Radar API (IAP, ASSN v2, devices, push, telemetry, admin)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/music-radar-api
+ExecStart=/usr/bin/node dist/index.js
+Environment=NODE_ENV=production
+Environment=PORT=8790
+Environment=BASE_PATH=/music-radar
+EnvironmentFile=/etc/music-radar.env
+Restart=on-failure
+RestartSec=3
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
