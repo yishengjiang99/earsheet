@@ -1,0 +1,136 @@
+name: ASC enable push + regenerate App Store profile
+
+# Approved by the owner 2026-10-03. For bundle id com.ragnus.pnge:
+#  1. enables the PUSH_NOTIFICATIONS capability (create-only; no-op if present)
+#  2. deletes the App Store profile `delete_profile_id` (profiles do not pick up new capabilities)
+#  3. creates a new IOS_APP_STORE profile with the same certificates, and verifies its
+#     embedded Entitlements include aps-environment. ios-testflight.yml reuses it automatically.
+# Nothing else is deleted or revoked.
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete_profile_id:
+        description: Old App Store profile to delete (empty = delete nothing)
+        required: false
+        type: string
+        default: ZVGVFXJTSU
+      fallback_certificate_id:
+        description: Distribution cert used if the old profile is already gone
+        required: false
+        type: string
+        default: YXDKHJC7J9
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable push and regenerate profile
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          BUNDLE: com.ragnus.pnge
+          PROFILE_NAME: AI Music Radar App Store (CI)
+          OLD_PROFILE: ${{ inputs.delete_profile_id }}
+          FALLBACK_CERT: ${{ inputs.fallback_certificate_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography
+          python3 <<'PY'
+          import base64, json, os, plistlib, subprocess, sys, tempfile, time, urllib.error, urllib.request
+          import jwt
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          token = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200,
+                              'aud': 'appstoreconnect-v1'}, p8, algorithm='ES256',
+                             headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          dry = os.environ['DRY_RUN'] == 'true'
+          def api(method, path, body=None, ok404=False):
+            req = urllib.request.Request('https://api.appstoreconnect.apple.com' + path, method=method,
+                                         data=None if body is None else json.dumps(body).encode(),
+                                         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+            try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read().decode()
+                return json.loads(raw) if raw else {}
+            except urllib.error.HTTPError as e:
+              if ok404 and e.code == 404:
+                return None
+              sys.exit(f'{method} {path} -> {e.code}: {e.read().decode()[:1500]}')
+          bundle = os.environ['BUNDLE']
+          bids = [b for b in api('GET', f'/v1/bundleIds?filter[identifier]={bundle}&limit=50')['data']
+                  if b['attributes']['identifier'] == bundle and b['attributes']['platform'] in ('IOS', 'UNIVERSAL')]
+          if not bids: sys.exit(f'bundle id {bundle} not found')
+          bid = bids[0]['id']
+          caps = api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities?limit=200')['data']
+          names = sorted(c['attributes']['capabilityType'] for c in caps)
+          print(f'bundle id resource {bid}; capabilities before: {names}')
+          if 'PUSH_NOTIFICATIONS' in names:
+            print('PUSH_NOTIFICATIONS already enabled')
+          elif dry:
+            print('[dry] would enable PUSH_NOTIFICATIONS')
+          else:
+            api('POST', '/v1/bundleIdCapabilities', {'data': {'type': 'bundleIdCapabilities',
+                'attributes': {'capabilityType': 'PUSH_NOTIFICATIONS'},
+                'relationships': {'bundleId': {'data': {'type': 'bundleIds', 'id': bid}}}}})
+            print('ENABLED PUSH_NOTIFICATIONS')
+          old = os.environ['OLD_PROFILE'].strip()
+          certs = []
+          if old:
+            prof = api('GET', f'/v1/profiles/{old}', ok404=True)
+            if prof:
+              a = prof['data']['attributes']
+              print(f"old profile {old}: {a['name']} {a['profileType']} {a['profileState']}")
+              certs = [c['id'] for c in api('GET', f'/v1/profiles/{old}/certificates?limit=50')['data']]
+              if dry:
+                print(f'[dry] would delete profile {old}')
+              else:
+                api('DELETE', f'/v1/profiles/{old}')
+                print(f'DELETED profile {old}')
+            else:
+              print(f'old profile {old} not found (already deleted)')
+          if not certs:
+            certs = [os.environ['FALLBACK_CERT'].strip()]
+          print(f'certificates: {certs}')
+          # Reuse an existing active App Store profile for this bundle that already has push (idempotent re-run)
+          existing = [p for p in api('GET', f'/v1/bundleIds/{bid}/profiles?limit=200')['data']
+                      if p['attributes']['profileType'] == 'IOS_APP_STORE' and p['attributes']['profileState'] == 'ACTIVE'
+                      and p['id'] != old]
+          def ents(content_b64):
+            with tempfile.NamedTemporaryFile(suffix='.mobileprovision') as f:
+              f.write(base64.b64decode(content_b64)); f.flush()
+              xml = subprocess.run(['openssl', 'smime', '-inform', 'der', '-verify', '-noverify', '-in', f.name],
+                                   capture_output=True, check=True).stdout
+            return plistlib.loads(xml)
+          new = None
+          for p in existing:
+            pl = ents(p['attributes']['profileContent'])
+            if 'aps-environment' in pl.get('Entitlements', {}):
+              new = p; print(f"reusing existing push-enabled profile {p['id']}"); break
+          if not new:
+            if dry:
+              print('[dry] would create IOS_APP_STORE profile'); sys.exit(0)
+            new = api('POST', '/v1/profiles', {'data': {'type': 'profiles',
+                'attributes': {'name': os.environ['PROFILE_NAME'], 'profileType': 'IOS_APP_STORE'},
+                'relationships': {'bundleId': {'data': {'type': 'bundleIds', 'id': bid}},
+                                  'certificates': {'data': [{'type': 'certificates', 'id': c} for c in certs]}}}})['data']
+            print(f"CREATED profile {new['id']}")
+          pl = ents(new['attributes']['profileContent'])
+          e = pl.get('Entitlements', {})
+          print(f"new profile {new['id']} name={pl.get('Name')} uuid={pl.get('UUID')} expires={pl.get('ExpirationDate')}")
+          print(f"team={e.get('com.apple.developer.team-identifier')} app-id={e.get('application-identifier')}")
+          print(f"aps-environment={e.get('aps-environment')}")
+          print(f"entitlement keys: {sorted(e)}")
+          caps = sorted(c['attributes']['capabilityType'] for c in api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities?limit=200')['data'])
+          print(f'capabilities after: {caps}')
+          if e.get('aps-environment') != 'production':
+            sys.exit('new profile is missing aps-environment=production')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
+            s.write(f"New App Store profile `{new['id']}` ({pl.get('Name')}), aps-environment=`{e.get('aps-environment')}`\n")
+          PY
