@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Current status (2026-10-03 11:46 PT):** E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 19 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052). Full history: Status log at the bottom (append-only).
+**Current status (2026-10-03 11:56 PT):** E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 29 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052). Full history: Status log at the bottom (append-only).
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
@@ -110,3 +110,4 @@ original wording.
 | 2026-10-03 11:26 | e5 | Status (auto): E5: ft-probe-pw0.3.log, final evaluation, epoch 0/1, 10 min since start. Last: [val-f1] epoch 1: note F1 0.6012 P 0.514 R 0.747 (best 0.8039) | (auto) |
 | 2026-10-03 11:36 | e6 | Status (auto): E6 (all data, onset pos weight 0.03, lr 3e-5, 8 epochs): ft-e6.log, final evaluation, epoch 4/8, 9 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
 | 2026-10-03 11:46 | e6 | Status (auto): E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 19 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
+| 2026-10-03 11:56 | e6 | Status (auto): E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 29 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
