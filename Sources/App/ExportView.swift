@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import SwiftUI
+
+/// Export format picker. Free tier: MP3 + photo free, PDF first 30s,
+/// MIDI + MusicXML locked behind Pro.
+struct ExportView: View {
+    let take: Take
+    @ObservedObject var proStore: ProStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showPaywall = false
+    @State private var shareItems: [Any] = []
+    @State private var showShare = false
+    @State private var isPreparing = false
+    @State private var notice: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Export") {
+                    ExportRow(icon: "doc.richtext", title: "PDF",
+                              subtitle: proStore.isPro ? "Full score" : "First 30 seconds",
+                              locked: false) {
+                        exportPDF()
+                    }
+                    ExportRow(icon: "waveform", title: "MP3",
+                              subtitle: "Audio rendering", locked: false) {
+                        exportMP3()
+                    }
+                    ExportRow(icon: "photo", title: "Photo",
+                              subtitle: "Save page image", locked: false) {
+                        exportPhoto()
+                    }
+                }
+                Section {
+                    ExportRow(icon: "music.note", title: "MIDI",
+                              subtitle: "Standard MIDI file",
+                              locked: !proStore.isPro) {
+                        exportMIDI()
+                    }
+                    ExportRow(icon: "doc.text", title: "MusicXML",
+                              subtitle: "Notation interchange",
+                              locked: !proStore.isPro) {
+                        exportMusicXML()
+                    }
+                } header: {
+                    Text("Pro formats")
+                } footer: {
+                    if !proStore.isPro {
+                        Text("MIDI and MusicXML export require AI Music Radar Pro.")
+                    }
+                }
+            }
+            .navigationTitle("Export")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(store: proStore)
+            }
+            .sheet(isPresented: $showShare) {
+                ShareSheet(items: shareItems)
+            }
+            .alert("AI Music Radar", isPresented: Binding(
+                get: { notice != nil },
+                set: { if !$0 { notice = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(notice ?? "")
+            }
+        }
+    }
+
+    // MARK: - Score helpers
+
+    /// Free tier PDF is the first 30 seconds only.
+    private var pdfScore: QuantizedScore {
+        guard !proStore.isPro else { return take.score }
+        var s = take.score
+        s.notes = s.notes.filter { $0.onset < 30 }
+        return s
+    }
+
+    private var baseName: String {
+        take.title.replacingOccurrences(of: "[^a-zA-Z0-9-_ ]", with: "", options: .regularExpression)
+    }
+
+    private func shareFile(name: String, data: Data) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try data.write(to: url, options: .atomic)
+            shareItems = [url]
+            showShare = true
+        } catch {
+            notice = "Could not write the file: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Exports
+
+    private func exportPDF() {
+        let pdf = Engraver.pdfData(score: pdfScore, pageSize: CGSize(width: 612, height: 792))
+        shareFile(name: "\(baseName).pdf", data: pdf)
+    }
+
+    private func exportMIDI() {
+        guard proStore.isPro else { showPaywall = true; return }
+        shareFile(name: "\(baseName).mid", data: MIDISupport.data(for: take.score))
+    }
+
+    private func exportMusicXML() {
+        guard proStore.isPro else { showPaywall = true; return }
+        shareFile(name: "\(baseName).musicxml", data: Data(MusicXMLWriter.xml(score: take.score).utf8))
+    }
+
+    private func exportMP3() {
+        isPreparing = true
+        Task {
+            do {
+                let mp3 = try await AudioExporter.mp3Data(for: take.score)
+                shareFile(name: "\(baseName).mp3", data: mp3)
+            } catch {
+                notice = "Could not render MP3: \(error.localizedDescription)"
+            }
+            isPreparing = false
+        }
+    }
+
+    private func exportPhoto() {
+        guard let image = SheetDetailView.photoImage(for: take.score),
+              let png = image.pngData() else {
+            notice = "Could not render the photo."
+            return
+        }
+        shareFile(name: "\(baseName).png", data: png)
+    }
+}
+
+private struct ExportRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let locked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundStyle(Ink.teal)
+                    .frame(width: 28)
+                VStack(alignment: .leading) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                }
+            }
+        }
+    }
+}

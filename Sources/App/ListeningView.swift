@@ -31,16 +31,21 @@ final class ListeningSession: ObservableObject {
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var level: Float = 0
     @Published private(set) var notice: String?
+    @Published var saveLimitReached = false
 
     private let library: TakeLibrary
+    private let proStore: ProStore
+    private let triggers: PaywallTriggers
+    private var pendingTake: Take?
     private let recorder = AudioRecorder()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
-    private var modelBox = ModelBox()
     private var timer: Timer?
 
-    init(library: TakeLibrary) {
+    init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers) {
         self.library = library
+        self.proStore = proStore
+        self.triggers = triggers
     }
 
     func start() {
@@ -58,11 +63,10 @@ final class ListeningSession: ObservableObject {
 
     private func begin() async {
         // Load the model before opening the mic; inference must keep up live.
-        let box = modelBox
         do {
-            let model = try await Task.detached(priority: .userInitiated) {
-                try box.get(modelsDirectory: BundledModels.modelsDirectory())
-            }.value
+            let model = try await runCancellableDetached {
+                try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
+            }
             let streamer = StreamingTranscriber(model: model)
             self.streamer = streamer
             let queue = self.pumpQueue
@@ -100,7 +104,7 @@ final class ListeningSession: ObservableObject {
         }
     }
 
-    func stop() {
+    func stop(dueToLimit: Bool = false) {
         guard case .listening = phase else { return }
         stopTimer()
         recorder.onSamples = nil
@@ -113,6 +117,9 @@ final class ListeningSession: ObservableObject {
         guard Transcriber.peakLevel(of: samples) >= 0.02 else {
             phase = .failed("Too quiet to transcribe. Try again, closer to the music.")
             return
+        }
+        if dueToLimit {
+            notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
         }
         phase = .writing
         let streamer = self.streamer
@@ -134,6 +141,22 @@ final class ListeningSession: ObservableObject {
                 guard let self else { return }
                 if score.notes.isEmpty {
                     self.phase = .failed("No notes found. Try again, closer to the music.")
+                } else if !self.proStore.isPro && self.library.userTakes.count >= ProStore.freeSaveLimit {
+                    // Free limit reached: the take is written and viewable,
+                    // but keeping it requires Pro.
+                    let take = Take(id: UUID(),
+                                    title: "Take \(self.library.takes.count + 1)",
+                                    createdAt: Date(),
+                                    score: score,
+                                    isSample: false)
+                    self.pendingTake = take
+                    self.phase = .done(take)
+                    if self.triggers.canShowAuto(.saveLimit) {
+                        self.triggers.recordAutoShown(.saveLimit)
+                        self.saveLimitReached = true
+                    } else {
+                        self.notice = "You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now."
+                    }
                 } else {
                     let take = self.library.addTake(score: score)
                     self.phase = .done(take)
@@ -144,13 +167,21 @@ final class ListeningSession: ObservableObject {
 
     func clearNotice() { notice = nil }
 
+    /// Save the pending take after the user upgrades to Pro.
+    func savePendingTake() {
+        guard let take = pendingTake else { return }
+        pendingTake = nil
+        saveLimitReached = false
+        library.importTake(take)
+    }
+
     private func startTimer() {
         stopTimer()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
-                if self.elapsed >= Transcriber.maxDurationSeconds { self.stop() }
+                if self.elapsed >= Transcriber.maxDurationSeconds { self.stop(dueToLimit: true) }
             }
         }
     }
@@ -167,6 +198,8 @@ final class ListeningSession: ObservableObject {
 /// fills with notes as they are heard, and a stop button.
 struct ListeningView: View {
     @StateObject var session: ListeningSession
+    @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -194,6 +227,17 @@ struct ListeningView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(session.notice ?? "")
+        }
+        .sheet(isPresented: $session.saveLimitReached) {
+            PaywallView(store: proStore)
+        }
+        .onChange(of: session.saveLimitReached) { _, showing in
+            if !showing && !proStore.isPro {
+                triggers.recordDismiss()
+            }
+        }
+        .onChange(of: proStore.isPro) { _, isPro in
+            if isPro { session.savePendingTake() }
         }
     }
 
@@ -225,8 +269,9 @@ struct ListeningView: View {
 
             HStack(spacing: 8) {
                 Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text(formattedElapsed(session.elapsed))
+                Text("\(formattedElapsed(session.elapsed)) / \(formattedElapsed(Transcriber.maxDurationSeconds))")
                     .font(.system(.body, design: .monospaced))
+                    .accessibilityLabel("Recording time \(formattedElapsed(session.elapsed)) of \(formattedElapsed(Transcriber.maxDurationSeconds)) limit")
             }
             .padding(.top, 4)
 

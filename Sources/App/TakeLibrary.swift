@@ -64,6 +64,12 @@ final class TakeLibrary: ObservableObject {
         return take
     }
 
+    /// Insert an already-built Take (e.g. a take held pending a Pro upgrade).
+    func importTake(_ take: Take) {
+        takes.insert(take, at: 0)
+        save()
+    }
+
     func delete(_ take: Take) {
         stopPlayback()
         takes.removeAll { $0.id == take.id }

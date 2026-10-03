@@ -58,6 +58,7 @@ public enum Transcriber {
         var start = 0
         var done = 0
         while start < padded.count {
+            try Task.checkCancellation()
             var window = [Float](repeating: 0, count: windowSamples)
             let avail = min(windowSamples, padded.count - start)
             window.replaceSubrange(0..<avail, with: padded[start..<(start + avail)])

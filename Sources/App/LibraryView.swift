@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import HearSheet
+import SF2Player
+import AVFoundation
 import SwiftUI
 
 /// The library: built-in samples plus the user's takes. Each row plays
 /// inline; the chevron opens the sheet. The mic button starts listening.
 struct LibraryView: View {
     @StateObject var library: TakeLibrary
+    @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
     @State private var showImporter = false
+    @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
+    @State private var importTask: Task<Void, Never>?
+    @State private var showPaywall = false
+    @State private var showSettings = false
+    @State private var pendingScore: (score: QuantizedScore, title: String?)?
 
     var body: some View {
         NavigationStack {
@@ -68,30 +77,71 @@ struct LibraryView: View {
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
-                SheetDetailView(take: take, library: library)
+                SheetDetailView(take: take, library: library, proStore: proStore)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { showImporter = true }) {
+                    Menu {
+                        Button("Choose Audio or MIDI File") { showImporter = true }
+                        Button("Choose Video from Photos") { showVideoPicker = true }
+                    } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
                     .accessibilityLabel("Import audio")
+                    .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                 }
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(store: proStore)
         }
         .sheet(isPresented: $showImporter) {
             AudioImporter { url in
                 showImporter = false
-                importAudio(url: url)
+                importPicked(url: url)
             }
+        }
+        .sheet(isPresented: $showVideoPicker) {
+            VideoPicker(
+                onPick: { url in
+                    showVideoPicker = false
+                    importVideo(url: url)
+                },
+                onCancel: { showVideoPicker = false }
+            )
         }
         .fullScreenCover(isPresented: $showListening) {
             if let session = listeningSession {
                 NavigationStack {
-                    ListeningView(session: session)
+                    ListeningView(session: session, proStore: proStore, triggers: triggers)
                         .navigationDestination(for: Take.self) { take in
-                            SheetDetailView(take: take, library: library)
+                            SheetDetailView(take: take, library: library, proStore: proStore)
                         }
+                }
+            }
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(store: proStore)
+        }
+        .onChange(of: showPaywall) { _, showing in
+            if !showing && !proStore.isPro {
+                triggers.recordDismiss()
+            }
+        }
+        .onChange(of: proStore.isPro) { _, isPro in
+            if isPro, let pending = pendingScore {
+                pendingScore = nil
+                showPaywall = false
+                if let title = pending.title {
+                    _ = library.addTake(title: title, score: pending.score)
+                } else {
+                    _ = library.addTake(score: pending.score)
                 }
             }
         }
@@ -107,28 +157,111 @@ struct LibraryView: View {
 
     private func startListening() {
         library.stopPlayback()
-        listeningSession = ListeningSession(library: library)
+        listeningSession = ListeningSession(library: library, proStore: proStore, triggers: triggers)
         showListening = true
     }
 
-    private func importAudio(url: URL) {
+    /// Route a picked document: MIDI files are parsed directly into notes,
+    /// everything else goes through audio transcription.
+    private func importPicked(url: URL) {
+        let ext = url.pathExtension.lowercased()
+        if ext == "mid" || ext == "midi" {
+            importMIDI(url: url)
+        } else {
+            importAudio(url: url)
+        }
+    }
+
+    /// Save a transcribed score, or hold it behind the paywall at the free limit.
+    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil) {
+        if !proStore.isPro && library.userTakes.count >= ProStore.freeSaveLimit {
+            pendingScore = (score, title)
+            if triggers.canShowAuto(.saveLimit) {
+                triggers.recordAutoShown(.saveLimit)
+                showPaywall = true
+            } else {
+                library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
+            }
+        } else if let title {
+            _ = library.addTake(title: title, score: score)
+        } else {
+            _ = library.addTake(score: score)
+        }
+    }
+
+    /// MIDI carries notes already: parse and quantize, no transcription.
+    private func importMIDI(url: URL) {
         Task { @MainActor in
             do {
-                let samples = try await Task.detached(priority: .userInitiated) {
-                    try AudioImport.loadMono22050(url: url)
-                }.value
+                let data = try Data(contentsOf: url)
+                let song = try SMFSong(data: data)
+                let events = song.tracks.flatMap(\.notes).map { r in
+                    NoteEvent(onset: r.startSec,
+                              offset: r.startSec + r.durationSec,
+                              midi: r.note,
+                              velocity: min(127, max(1, r.velocity)))
+                }.sorted { $0.onset < $1.onset }
+                guard !events.isEmpty else {
+                    library.postNotice("No notes found in that MIDI file.")
+                    return
+                }
+                let score = Quantizer.quantize(events)
+                saveImportedScore(score, title: url.deletingPathExtension().lastPathComponent)
+            } catch {
+                library.postNotice("Could not read that MIDI file.")
+            }
+        }
+    }
+
+    /// Video from Photos: extract the audio track, then transcribe as usual.
+    private func importVideo(url: URL) {
+        importTask?.cancel()
+        importTask = Task { @MainActor in
+            do {
+                let samples = try await runCancellableDetached {
+                    try AudioImport.loadMono22050(asset: AVAsset(url: url))
+                }
+                try? FileManager.default.removeItem(at: url) // temp copy
                 guard !samples.isEmpty else { return }
-                let notes = try await Task.detached(priority: .userInitiated) {
-                    let box = ModelBox()
-                    let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
+                let notes = try await runCancellableDetached {
+                    let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
-                }.value
+                }
+                let score = Quantizer.quantize(notes)
+                if score.notes.isEmpty {
+                    library.postNotice("No notes found in that video's audio.")
+                } else {
+                    saveImportedScore(score)
+                }
+            } catch is CancellationError {
+                // Superseded by a newer import; stay silent.
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                library.postNotice("Could not read that video's audio.")
+            }
+        }
+    }
+
+    private func importAudio(url: URL) {
+        importTask?.cancel()
+        importTask = Task { @MainActor in
+            do {
+                let samples = try await runCancellableDetached {
+                    try AudioImport.loadMono22050(url: url)
+                }
+                guard !samples.isEmpty else { return }
+                let notes = try await runCancellableDetached {
+                    let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
+                    return try Transcriber.transcribe(samples: samples, model: model)
+                }
                 let score = Quantizer.quantize(notes)
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
                     _ = library.addTake(score: score)
                 }
+            } catch is CancellationError {
+                // Superseded by a newer import; stay silent.
             } catch {
                 library.postNotice("Could not read that audio file.")
             }
