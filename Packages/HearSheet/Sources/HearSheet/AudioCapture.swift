@@ -7,7 +7,9 @@ import Foundation
 /// the device.
 public final class AudioRecorder {
     public static let targetSampleRate = 22050.0
-    /// Maximum take length: 60 seconds.
+    /// Longest live take (10 minutes, `Transcriber.maxDurationSeconds`). At the limit the recorder
+    /// stops keeping audio and calls `onLimitReached` once; callers stop and tell the user.
+    public static let maxRecordingSeconds = Transcriber.maxDurationSeconds
     public static let maxSamples = Transcriber.maxSamples
 
     private let engine = AVAudioEngine()
@@ -22,6 +24,16 @@ public final class AudioRecorder {
     /// Called on the audio thread with each tap's samples (a copy).
     /// Used by the live-listening screen to feed the streaming transcriber.
     public var onSamples: (([Float]) -> Void)?
+
+    /// Called once on the audio thread when the take reaches `maxRecordingSeconds`.
+    public var onLimitReached: (() -> Void)?
+
+    /// True once the current take hit `maxRecordingSeconds`.
+    public var didReachLimit: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return reachedLimit
+    }
+    private var reachedLimit = false
 
     public init() {}
 
@@ -38,6 +50,7 @@ public final class AudioRecorder {
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         peak = 0
+        reachedLimit = false
         lock.unlock()
 
         let input = engine.inputNode
@@ -52,18 +65,22 @@ public final class AudioRecorder {
                 if a > localPeak { localPeak = a }
             }
             self.lock.lock()
-            let remaining = Self.maxSamples - self.samples.count
-            if remaining > 0 {
-                self.samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: min(n, remaining)))
+            let take = max(0, min(n, Self.maxSamples - self.samples.count))
+            if take > 0 {
+                self.samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: take))
             }
+            let justHitLimit = !self.reachedLimit && self.samples.count >= Self.maxSamples
+            if justHitLimit { self.reachedLimit = true }
             if localPeak > self.peak { self.peak = localPeak } else { self.peak *= 0.999 }
             let p = self.peak
             let emit = self.onSamples
+            let limit = justHitLimit ? self.onLimitReached : nil
             self.lock.unlock()
             self.onLevel?(p)
-            if let emit {
-                emit(Array(UnsafeBufferPointer(start: ch, count: min(n, remaining))))
+            if let emit, take > 0 {
+                emit(Array(UnsafeBufferPointer(start: ch, count: take)))
             }
+            limit?()
         }
         engine.prepare()
         try engine.start()
@@ -91,7 +108,18 @@ public final class AudioRecorder {
 
 /// Imports an audio file, converting to 22050 Hz mono float32.
 public enum AudioImport {
-    public static func loadMono22050(url: URL, maxSamples: Int = AudioRecorder.maxSamples) throws -> [Float] {
+    /// Duration of an audio file in seconds (nil if unreadable).
+    public static func durationSeconds(url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 else { return nil }
+        return Double(file.length) / file.processingFormat.sampleRate
+    }
+
+    /// - Parameters:
+    ///   - maxSamples: cap at 22050 Hz.
+    ///   - truncate: true keeps the first `maxSamples` of a longer file (the free 30 s import);
+    ///     false throws `durationLimitExceeded` instead.
+    public static func loadMono22050(url: URL, maxSamples: Int = AudioRecorder.maxSamples,
+                                     truncate: Bool = false) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
         let srcFormat = file.processingFormat
         let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -99,7 +127,7 @@ public enum AudioImport {
                                       channels: 1, interleaved: false)!
         let sampleLimit = min(maxSamples, AudioRecorder.maxSamples)
         guard sampleLimit > 0 else { throw ImportError.durationLimitExceeded }
-        if srcFormat.sampleRate > 0,
+        if !truncate, srcFormat.sampleRate > 0,
            Double(file.length) / srcFormat.sampleRate > Double(sampleLimit) / dstFormat.sampleRate {
             throw ImportError.durationLimitExceeded
         }

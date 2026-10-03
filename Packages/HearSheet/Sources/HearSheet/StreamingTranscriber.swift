@@ -24,9 +24,11 @@ public final class StreamingTranscriber: @unchecked Sendable {
     private var contourFrames: [[Float]] = []
     private var nextWindow = 0
     private var audioSampleCount = 0
+    public let thresholds: BasicPitchDecoder.Thresholds
 
-    public init(model: BasicPitchModel) {
+    public init(model: BasicPitchModel, thresholds: BasicPitchDecoder.Thresholds = BasicPitchDecoder.Thresholds()) {
         self.model = model
+        self.thresholds = thresholds
         padded = [Float](repeating: 0, count: Transcriber.frontPadSamples)
     }
 
@@ -117,8 +119,17 @@ public final class StreamingTranscriber: @unchecked Sendable {
 
     /// Decode notes from the frames collected so far (no end-trim).
     /// For the live preview; the trailing edge may shift as audio arrives.
-    public func liveNotes() -> [NoteEvent] {
-        decode(frames: snapshot(trimmed: false))
+    /// - Parameter tailSeconds: decode only the most recent frames (the live staff shows a
+    ///   rolling window), so the cost stays flat on long takes. nil decodes everything.
+    public func liveNotes(tailSeconds: Double? = nil) -> [NoteEvent] {
+        guard let tail = tailSeconds else { return decode(frames: snapshot(trimmed: false)) }
+        // Copy only the tail under the lock (the full buffers grow to ~90 MB on a 10 min take).
+        let keep = max(1, Int(tail * 22050.0 / 256.0))
+        lock.lock()
+        let first = max(0, noteFrames.count - keep)
+        let n = Array(noteFrames[first...]), o = Array(onsetFrames[first...]), c = Array(contourFrames[first...])
+        lock.unlock()
+        return decode(frames: (n, o, c), frameOffset: first)
     }
 
     /// Final notes with the batch path's end-trim applied.
@@ -143,12 +154,13 @@ public final class StreamingTranscriber: @unchecked Sendable {
         return (n, o, c)
     }
 
-    private func decode(frames: ([[Float]], [[Float]], [[Float]])) -> [NoteEvent] {
-        let raw = BasicPitchDecoder.decode(frames: frames.0, onset: frames.1, contour: frames.2)
+    private func decode(frames: ([[Float]], [[Float]], [[Float]]), frameOffset: Int = 0) -> [NoteEvent] {
+        let raw = BasicPitchDecoder.decode(frames: frames.0, onset: frames.1, contour: frames.2,
+                                           thresholds: thresholds)
         return raw.map { r in
             NoteEvent(
-                onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),
-                offset: BasicPitchDecoder.frameToTime(frame: r.endFrame),
+                onset: BasicPitchDecoder.frameToTime(frame: r.startFrame + frameOffset),
+                offset: BasicPitchDecoder.frameToTime(frame: r.endFrame + frameOffset),
                 midi: r.midi,
                 velocity: min(127, max(1, Int((127 * r.amplitude).rounded()))))
         }.sorted { $0.onset < $1.onset }

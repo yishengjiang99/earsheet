@@ -10,7 +10,9 @@ import Foundation
 /// (v0.4.0's `floor(L * 86 / 22050)` trim differs only in trailing-frame count;
 /// main's `int((L / 36164) * 142)` is used since the decoder port targets main.)
 public enum Transcriber {
-    public static let maxDurationSeconds = 60.0
+    /// Longest audio one transcription accepts (10 minutes). Callers apply tier limits on top
+    /// (e.g. the free 30 s import) and say so in the UI; nothing is cut silently here.
+    public static let maxDurationSeconds = 600.0
     public static let maxSamples = Int(HearSheet.sampleRate * maxDurationSeconds)
     public static let frontPadSamples = 3840       // overlap_len / 2
     public static let hopSamples = 36164           // AUDIO_N_SAMPLES - 30 * FFT_HOP
@@ -25,7 +27,7 @@ public enum Transcriber {
             switch self {
             case .emptyAudio: return "No audio to transcribe."
             case .tooQuiet: return "The take is too quiet to transcribe."
-            case .durationLimitExceeded: return "Audio must be 60 seconds or shorter."
+            case .durationLimitExceeded: return "Audio must be \(Int(maxDurationSeconds / 60)) minutes or shorter."
             }
         }
     }
@@ -33,11 +35,14 @@ public enum Transcriber {
     /// - Parameters:
     ///   - samples: 22050 Hz mono float32.
     ///   - model: loaded Basic Pitch Core ML model.
+    ///   - thresholds: decoder thresholds for this model (see docs/finetune/IOS_MODEL_HANDOFF.md §6).
     ///   - onProgress: 0...1 as windows complete. Called off the main thread.
     /// - Returns: detected notes, sorted by onset.
+    /// - Throws: `CancellationError` between windows when the calling task is cancelled.
     public static func transcribe(
         samples: [Float],
         model: BasicPitchModel,
+        thresholds: BasicPitchDecoder.Thresholds = BasicPitchDecoder.Thresholds(),
         onProgress: ((Double) -> Void)? = nil
     ) throws -> [NoteEvent] {
         guard !samples.isEmpty else { throw TranscribeError.emptyAudio }
@@ -58,6 +63,7 @@ public enum Transcriber {
         var start = 0
         var done = 0
         while start < padded.count {
+            try Task.checkCancellation()
             var window = [Float](repeating: 0, count: windowSamples)
             let avail = min(windowSamples, padded.count - start)
             window.replaceSubrange(0..<avail, with: padded[start..<(start + avail)])
@@ -78,7 +84,9 @@ public enum Transcriber {
             contourFrames.removeLast(contourFrames.count - keep)
         }
 
-        let raw = BasicPitchDecoder.decode(frames: noteFrames, onset: onsetFrames, contour: contourFrames)
+        try Task.checkCancellation()
+        let raw = BasicPitchDecoder.decode(frames: noteFrames, onset: onsetFrames, contour: contourFrames,
+                                           thresholds: thresholds)
         return raw.map { r in
             NoteEvent(
                 onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),
