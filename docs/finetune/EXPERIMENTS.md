@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Current status (2026-10-03 11:56 PT):** E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 29 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052). Full history: Status log at the bottom (append-only).
+**Current status (2026-10-03 12:06 PT):** E7 eval (compare_models: e7 pw0.01 + probe pw0.03, tuned decoders): ft-e7-compare.log, training, epoch 0/?, 39 min since start. Last: n/a. Full history: Status log at the bottom (append-only).
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
@@ -114,3 +114,4 @@ original wording.
 | 2026-10-03 11:46 | e6 | Status (auto): E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 19 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
 | 2026-10-03 11:56 | e6 | Status (auto): E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 29 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
 | 2026-10-03 11:58 | E6 result | E6 (all data, onset pos weight 0.03, 8-epoch schedule) peaked at epoch 1 (mixed val 0.805, then 0.791 / 0.791 / 0.787) and stopped. Held-out at default decoder vs stock: SMD 0.727 vs 0.703, MAESTRO 0.703 vs 0.695, GuitarSet 0.785 vs 0.802, FluidR3 0.857 vs 0.901. With each model's tuned decoder, stock wins on real audio (stock [0.7/0.4/5]: GuitarSet 0.843, MAESTRO 0.735, SMD 0.762; E6: 0.832 / 0.720 / 0.761). Not shipped; published as release model-ft-exp6. E7 (pos weight 0.01, 2 epochs) reached mixed val 0.8166 at epoch 1 (P 0.801 R 0.854); full held-out comparison running. Export fix: fine-tuned graphs name the input input_1, so it is renamed to input_2 for Core ML | (this commit) |
+| 2026-10-03 12:06 | e7 | Status (auto): E7 eval (compare_models: e7 pw0.01 + probe pw0.03, tuned decoders): ft-e7-compare.log, training, epoch 0/?, 39 min since start. Last: n/a | (auto) |
