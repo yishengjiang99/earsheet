@@ -85,14 +85,12 @@ jobs:
 
       - name: HearSheet package tests (macOS)
         if: always()
-        continue-on-error: true
         run: |
           set -o pipefail
           swift test --package-path Packages/HearSheet 2>&1 | tee "$RUNNER_TEMP/hearsheet.log"
 
       - name: SF2Player package tests (macOS, gbk parity)
         if: always()
-        continue-on-error: true
         env:
           SF2PLAYER_SF2: ${{ github.workspace }}/models/GeneralUser-GS.sf2
         run: |

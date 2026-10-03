@@ -226,21 +226,27 @@ for m in args.midis {
 }
 guard !jobs.isEmpty else { fail("nothing to do: pass --generate N or --midi files") }
 
+var succeeded = 0
+var failed = 0
 for job in jobs {
+    let wavURL = outDir.appendingPathComponent(job.stem + ".wav")
+    let midURL = outDir.appendingPathComponent(job.stem + ".mid")
+    let jsonURL = outDir.appendingPathComponent(job.stem + ".json")
     let buf: SF2StereoBuffer
     do {
         buf = try SF2OfflineRenderer.render(midi: job.midi, soundFont: soundFont,
                                             sampleRate: sampleRate, tailSec: 2.0)
     } catch {
         FileHandle.standardError.write(Data("skip \(job.stem): render failed: \(error)\n".utf8))
+        try? FileManager.default.removeItem(at: wavURL)
+        try? FileManager.default.removeItem(at: midURL)
+        try? FileManager.default.removeItem(at: jsonURL)
+        failed += 1
         continue
     }
     // Mono mixdown for the training pipeline (basic-pitch 0.4.0 asserts 1 channel).
     var mono = [Float](repeating: 0, count: buf.length)
     for i in 0..<buf.length { mono[i] = (buf.left[i] + buf.right[i]) * 0.5 }
-    let wavURL = outDir.appendingPathComponent(job.stem + ".wav")
-    let midURL = outDir.appendingPathComponent(job.stem + ".mid")
-    let jsonURL = outDir.appendingPathComponent(job.stem + ".json")
     do {
         try writeWAV(url: wavURL, samples: mono)
         try job.midi.write(to: midURL)
@@ -251,8 +257,14 @@ for job in jobs {
             .write(to: jsonURL)
     } catch {
         FileHandle.standardError.write(Data("skip \(job.stem): write failed: \(error)\n".utf8))
+        try? FileManager.default.removeItem(at: wavURL)
+        try? FileManager.default.removeItem(at: midURL)
+        try? FileManager.default.removeItem(at: jsonURL)
+        failed += 1
         continue
     }
     print("wrote \(job.stem) (\(mono.count) samples)")
+    succeeded += 1
 }
-print("done: \(jobs.count) job(s) -> \(args.out)")
+print("done: \(succeeded)/\(jobs.count) job(s) succeeded, \(failed) failed -> \(args.out)")
+if failed > 0 { exit(1) }

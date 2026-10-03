@@ -21,7 +21,7 @@ struct StaffPageView: UIViewRepresentable {
 
 final class StaffRenderView: UIView {
     var score: QuantizedScore? {
-        didSet { relayout() }
+        didSet { if score != oldValue { relayout() } }
     }
     var highlighted: Set<Int> = [] {
         didSet { if highlighted != oldValue { setNeedsDisplay() } }

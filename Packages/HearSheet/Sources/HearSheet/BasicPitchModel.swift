@@ -125,28 +125,45 @@ public final class BasicPitchModel {
         return (note, onset, contour)
     }
 
-    /// Persistent compiled-model cache, keyed by a hash of the source spec so
+    /// Persistent compiled-model cache, keyed by the complete source package so
     /// a swapped checkpoint recompiles instead of loading a stale cache.
     private static func persistentCompiledURL(for packageURL: URL) throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true)
-        let specURL = packageURL
-            .appendingPathComponent("Data/com.apple.CoreML/model.mlmodel", isDirectory: false)
-        let key = (try? fnv1aHex(of: specURL)) ?? "unknown"
+        let key = try fnv1aHex(of: packageURL)
         return support
             .appendingPathComponent("EarSheet", isDirectory: true)
             .appendingPathComponent("BasicPitchPoly-\(key).mlmodelc", isDirectory: true)
     }
 
-    private static func fnv1aHex(of url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
+    private static func fnv1aHex(of packageURL: URL) throws -> String {
+        let rootPath = packageURL.standardizedFileURL.path
+        let enumerator = FileManager.default.enumerator(
+            at: packageURL, includingPropertiesForKeys: [.isRegularFileKey])
+        var files: [URL] = []
+        while let url = enumerator?.nextObject() as? URL {
+            if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                files.append(url)
+            }
+        }
+        files.sort { $0.path < $1.path }
+
         var h: UInt64 = 0xcbf29ce484222325
-        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            for b in chunk {
+        func update(_ bytes: some Sequence<UInt8>) {
+            for b in bytes {
                 h ^= UInt64(b)
                 h = h &* 0x100000001b3
+            }
+        }
+        for url in files {
+            let relativePath = String(url.standardizedFileURL.path.dropFirst(rootPath.count + 1))
+            update(relativePath.utf8)
+            update([0])
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+                update(chunk)
             }
         }
         return String(format: "%016llx", h)

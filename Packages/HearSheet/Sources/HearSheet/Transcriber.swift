@@ -10,6 +10,8 @@ import Foundation
 /// (v0.4.0's `floor(L * 86 / 22050)` trim differs only in trailing-frame count;
 /// main's `int((L / 36164) * 142)` is used since the decoder port targets main.)
 public enum Transcriber {
+    public static let maxDurationSeconds = 60.0
+    public static let maxSamples = Int(HearSheet.sampleRate * maxDurationSeconds)
     public static let frontPadSamples = 3840       // overlap_len / 2
     public static let hopSamples = 36164           // AUDIO_N_SAMPLES - 30 * FFT_HOP
     public static let stripFrames = 15             // half of the 30 overlapping frames
@@ -18,10 +20,12 @@ public enum Transcriber {
     public enum TranscribeError: Error, CustomStringConvertible {
         case emptyAudio
         case tooQuiet
+        case durationLimitExceeded
         public var description: String {
             switch self {
             case .emptyAudio: return "No audio to transcribe."
             case .tooQuiet: return "The take is too quiet to transcribe."
+            case .durationLimitExceeded: return "Audio must be 60 seconds or shorter."
             }
         }
     }
@@ -37,6 +41,7 @@ public enum Transcriber {
         onProgress: ((Double) -> Void)? = nil
     ) throws -> [NoteEvent] {
         guard !samples.isEmpty else { throw TranscribeError.emptyAudio }
+        try validateSampleCount(samples.count)
 
         let windowSamples = HearSheet.windowSamples
         var padded = [Float](repeating: 0, count: frontPadSamples + samples.count)
@@ -81,6 +86,10 @@ public enum Transcriber {
                 midi: r.midi,
                 velocity: min(127, max(1, Int((127 * r.amplitude).rounded()))))
         }.sorted { $0.onset < $1.onset }
+    }
+
+    static func validateSampleCount(_ count: Int) throws {
+        guard count <= maxSamples else { throw TranscribeError.durationLimitExceeded }
     }
 
     /// Peak absolute amplitude of a take; below ~0.02 the take counts as too quiet.

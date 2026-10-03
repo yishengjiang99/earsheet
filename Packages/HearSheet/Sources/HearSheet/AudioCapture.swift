@@ -7,8 +7,8 @@ import Foundation
 /// the device.
 public final class AudioRecorder {
     public static let targetSampleRate = 22050.0
-    /// Maximum take length: 10 minutes.
-    public static let maxSamples = Int(targetSampleRate * 600)
+    /// Maximum take length: 60 seconds.
+    public static let maxSamples = Transcriber.maxSamples
 
     private let engine = AVAudioEngine()
     private let lock = NSLock()
@@ -48,8 +48,9 @@ public final class AudioRecorder {
                 if a > localPeak { localPeak = a }
             }
             self.lock.lock()
-            if self.samples.count < Self.maxSamples {
-                self.samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: n))
+            let remaining = Self.maxSamples - self.samples.count
+            if remaining > 0 {
+                self.samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: min(n, remaining)))
             }
             if localPeak > self.peak { self.peak = localPeak } else { self.peak *= 0.999 }
             let p = self.peak
@@ -88,14 +89,20 @@ public enum AudioImport {
         let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                       sampleRate: AudioRecorder.targetSampleRate,
                                       channels: 1, interleaved: false)!
+        let sampleLimit = min(maxSamples, AudioRecorder.maxSamples)
+        guard sampleLimit > 0 else { throw ImportError.durationLimitExceeded }
+        if srcFormat.sampleRate > 0,
+           Double(file.length) / srcFormat.sampleRate > Double(sampleLimit) / dstFormat.sampleRate {
+            throw ImportError.durationLimitExceeded
+        }
         var out: [Float] = []
-        out.reserveCapacity(min(Int(file.length), maxSamples))
+        out.reserveCapacity(min(Int(file.length), sampleLimit))
 
         if srcFormat.sampleRate == dstFormat.sampleRate, srcFormat.channelCount == 1,
            srcFormat.commonFormat == .pcmFormatFloat32, !srcFormat.isInterleaved {
             // Fast path: already the target format.
-            while out.count < maxSamples {
-                let n = min(8192, maxSamples - out.count)
+            while out.count < sampleLimit {
+                let n = min(8192, sampleLimit - out.count)
                 guard let buf = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(n)) else { break }
                 try file.read(into: buf, frameCount: AVAudioFrameCount(n))
                 if buf.frameLength == 0 { break }
@@ -131,14 +138,15 @@ public enum AudioImport {
             return buf
         }
 
-        while out.count < maxSamples {
+        while out.count < sampleLimit {
             guard let dst = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: 8192) else { break }
             var err: NSError?
             let status = converter.convert(to: dst, error: &err, withInputFrom: inputBlock)
             if let err { throw err }
             if dst.frameLength > 0 {
+                let count = min(Int(dst.frameLength), sampleLimit - out.count)
                 out.append(contentsOf: UnsafeBufferPointer(start: dst.floatChannelData![0],
-                                                           count: Int(dst.frameLength)))
+                                                           count: count))
             }
             if status == .endOfStream { break }
             if status == .inputRanDry { break }
@@ -146,7 +154,8 @@ public enum AudioImport {
         return out
     }
 
-    public enum ImportError: Error {
+    public enum ImportError: Error, Equatable {
+        case durationLimitExceeded
         case conversionFailed
     }
 }

@@ -11,48 +11,52 @@ static inline void sf2_atomic_store_i64(int64_t *p, int64_t v) { __atomic_store_
 static inline uint64_t sf2_atomic_load_u64(const uint64_t *p) { return __atomic_load_n(p, __ATOMIC_ACQUIRE); }
 static inline void sf2_atomic_store_u64(uint64_t *p, uint64_t v) { __atomic_store_n(p, v, __ATOMIC_RELEASE); }
 
-// Level meter shared between the audio thread (sf2_meter_add, once per render callback) and the
-// UI thread (sf2_meter_take, ~30 Hz). Lock-free: peaks use a CAS max on the float bit pattern
-// (non-negative IEEE floats order like their uint32 bits), sums a CAS add on double bits, and
-// take() exchanges every field with 0 so nothing between two UI polls is missed.
+// Single-producer/single-consumer level-meter queue. Each render callback publishes one complete
+// block; the UI drains complete blocks so frame counts and sums always stay paired.
+#define SF2_METER_QUEUE_CAPACITY 256
 typedef struct {
-    uint32_t peak[2];
-    uint64_t sumSq[2];
+    float peakL, peakR;
+    double sumSqL, sumSqR;
     uint64_t frames;
+} sf2_meter_block;
+
+typedef struct {
+    sf2_meter_block blocks[SF2_METER_QUEUE_CAPACITY];
+    uint64_t writeIndex;
+    uint64_t readIndex;
 } sf2_meter;
 
-static inline void sf2_meter_max_f32(uint32_t *p, float v) {
-    if (!(v > 0.0f)) return;
-    uint32_t bits; memcpy(&bits, &v, sizeof bits);
-    uint32_t cur = __atomic_load_n(p, __ATOMIC_RELAXED);
-    while (bits > cur && !__atomic_compare_exchange_n(p, &cur, bits, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
-}
-
-static inline void sf2_meter_add_f64(uint64_t *p, double v) {
-    uint64_t cur = __atomic_load_n(p, __ATOMIC_RELAXED), next;
-    do {
-        double d; memcpy(&d, &cur, sizeof d);
-        d += v;
-        memcpy(&next, &d, sizeof next);
-    } while (!__atomic_compare_exchange_n(p, &cur, next, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-}
-
 static inline void sf2_meter_add(sf2_meter *m, float peakL, float peakR, double sumSqL, double sumSqR, uint64_t frames) {
-    sf2_meter_max_f32(&m->peak[0], peakL);
-    sf2_meter_max_f32(&m->peak[1], peakR);
-    sf2_meter_add_f64(&m->sumSq[0], sumSqL);
-    sf2_meter_add_f64(&m->sumSq[1], sumSqR);
-    __atomic_fetch_add(&m->frames, frames, __ATOMIC_RELEASE);
+    uint64_t write = __atomic_load_n(&m->writeIndex, __ATOMIC_RELAXED);
+    uint64_t read = __atomic_load_n(&m->readIndex, __ATOMIC_ACQUIRE);
+    if (write - read >= SF2_METER_QUEUE_CAPACITY) return; // Drop the whole block on overflow.
+    sf2_meter_block *block = &m->blocks[write % SF2_METER_QUEUE_CAPACITY];
+    block->peakL = peakL;
+    block->peakR = peakR;
+    block->sumSqL = sumSqL;
+    block->sumSqR = sumSqR;
+    block->frames = frames;
+    __atomic_store_n(&m->writeIndex, write + 1, __ATOMIC_RELEASE);
 }
 
 static inline void sf2_meter_take(sf2_meter *m, float *peakL, float *peakR, double *sumSqL, double *sumSqR, uint64_t *frames) {
-    *frames = __atomic_exchange_n(&m->frames, 0, __ATOMIC_ACQUIRE);
-    uint64_t sl = __atomic_exchange_n(&m->sumSq[0], 0, __ATOMIC_RELAXED);
-    uint64_t sr = __atomic_exchange_n(&m->sumSq[1], 0, __ATOMIC_RELAXED);
-    uint32_t pl = __atomic_exchange_n(&m->peak[0], 0, __ATOMIC_RELAXED);
-    uint32_t pr = __atomic_exchange_n(&m->peak[1], 0, __ATOMIC_RELAXED);
-    memcpy(sumSqL, &sl, sizeof sl); memcpy(sumSqR, &sr, sizeof sr);
-    memcpy(peakL, &pl, sizeof pl); memcpy(peakR, &pr, sizeof pr);
+    uint64_t read = __atomic_load_n(&m->readIndex, __ATOMIC_RELAXED);
+    uint64_t write = __atomic_load_n(&m->writeIndex, __ATOMIC_ACQUIRE);
+    *peakL = 0;
+    *peakR = 0;
+    *sumSqL = 0;
+    *sumSqR = 0;
+    *frames = 0;
+    while (read < write) {
+        const sf2_meter_block *block = &m->blocks[read % SF2_METER_QUEUE_CAPACITY];
+        if (block->peakL > *peakL) *peakL = block->peakL;
+        if (block->peakR > *peakR) *peakR = block->peakR;
+        *sumSqL += block->sumSqL;
+        *sumSqR += block->sumSqR;
+        *frames += block->frames;
+        read++;
+    }
+    __atomic_store_n(&m->readIndex, read, __ATOMIC_RELEASE);
 }
 
 #endif

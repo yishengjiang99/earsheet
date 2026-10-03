@@ -127,4 +127,26 @@ final class HearSheetTests: XCTestCase {
         XCTAssertFalse(score.key.isMinor)
         XCTAssertEqual(score.notes.count, 4)
     }
+
+    func testKeySignaturesUseChromaticTonic() {
+        let majorFifths = [0, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5]
+        let minorFifths = [-3, 4, -1, -6, 1, -4, 3, -2, 5, 0, -5, 2]
+        for tonic in 0..<12 {
+            XCTAssertEqual(MusicalKey(tonic: tonic, isMinor: false).fifths, majorFifths[tonic])
+            XCTAssertEqual(MusicalKey(tonic: tonic, isMinor: true).fifths,
+                           minorFifths[tonic])
+        }
+
+        let gMajor = QuantizedScore(notes: [], tempoBPM: 120, meter: .fourFour,
+                                    key: MusicalKey(tonic: 7, isMinor: false), secondsPer16th: 0.125)
+        let aMinor = QuantizedScore(notes: [], tempoBPM: 120, meter: .fourFour,
+                                    key: MusicalKey(tonic: 9, isMinor: true), secondsPer16th: 0.125)
+        XCTAssertTrue(MusicXMLWriter.xml(score: gMajor).contains("<fifths>1</fifths>"))
+        XCTAssertTrue(MusicXMLWriter.xml(score: aMinor).contains("<fifths>0</fifths>"))
+    }
+
+    func testTranscriberRejectsTakesOverOneMinute() {
+        XCTAssertNoThrow(try Transcriber.validateSampleCount(Transcriber.maxSamples))
+        XCTAssertThrowsError(try Transcriber.validateSampleCount(Transcriber.maxSamples + 1))
+    }
 }

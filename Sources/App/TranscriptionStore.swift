@@ -112,7 +112,10 @@ public final class TranscriptionStore: ObservableObject {
                 samples = try AudioImport.loadMono22050(url: url)
             } catch {
                 await MainActor.run {
-                    self.phase = .failed(message: "Could not read that audio file.",
+                    let message = (error as? AudioImport.ImportError) == .durationLimitExceeded
+                        ? "Audio must be 60 seconds or shorter."
+                        : "Could not read that audio file."
+                    self.phase = .failed(message: message,
                                          offersImport: true)
                 }
                 return
@@ -264,6 +267,9 @@ public final class TranscriptionStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, case .recording = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
+                if self.elapsed >= Transcriber.maxDurationSeconds {
+                    self.stopRecording()
+                }
             }
         }
     }

@@ -42,10 +42,11 @@ public struct MusicalKey: Equatable, Sendable {
     }
     /// Fifths for the key signature: C=0, G=1, F=-1, ...
     public var fifths: Int {
-        // Circle of fifths: major tonics C G D A E B F# / F Bb Eb Ab Db Gb.
-        let majorFifths = [0, 1, 2, 3, 4, 5, 6, -5, -4, -3, -2, -1]
-        let f = majorFifths[(tonic % 12 + 12) % 12]
-        return isMinor ? f - 3 : f
+        // Prefer conventional enharmonic spellings for chromatic major/minor tonics.
+        let fifthsByTonic = isMinor
+            ? [-3, 4, -1, -6, 1, -4, 3, -2, 5, 0, -5, 2]
+            : [0, -5, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5]
+        return fifthsByTonic[(tonic % 12 + 12) % 12]
     }
 }
 

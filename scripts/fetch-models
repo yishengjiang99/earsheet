@@ -89,10 +89,13 @@ while read -r want name url extra || [ -n "${want:-}" ]; do
   stamp="$STAMPS/$(printf '%s' "$name" | tr '/' '_').sha256"
   mkdir -p "$(dirname "$target")"
 
-  if [ -e "$target" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
-    log "skip   $name (stamp ok)"
-    skipped=$((skipped + 1))
-    continue
+  if [ -e "$target" ] && [ -f "$stamp" ]; then
+    installed="$(sha256_tree "$target")"
+    if [ "$(cat "$stamp")" = "$want $installed" ]; then
+      log "skip   $name (stamp and installed hash ok)"
+      skipped=$((skipped + 1))
+      continue
+    fi
   fi
   if [ -e "$target" ]; then
     log "stale  $name - removing and re-downloading"
@@ -140,7 +143,8 @@ while read -r want name url extra || [ -n "${want:-}" ]; do
       mv -f "$asset" "$target.part" && mv -f "$target.part" "$target"
       ;;
   esac
-  printf '%s' "$want" > "$stamp"
+  installed="$(sha256_tree "$target")"
+  printf '%s %s\n' "$want" "$installed" > "$stamp"
   log "ok     $name"
   fetched=$((fetched + 1))
 done < "$LOCK"
