@@ -1,0 +1,10 @@
+#!/bin/sh
+# Idempotent model fetch. Weights are pinned in models.lock and never committed.
+set -eu
+mkdir -p models
+if [ ! -s models.lock ]; then
+  echo "models.lock empty; nothing to fetch"
+  exit 0
+fi
+echo "models.lock present; fetch step not wired yet"
+exit 0
