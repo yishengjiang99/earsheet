@@ -101,8 +101,10 @@ public enum AudioImport {
         if srcFormat.sampleRate == dstFormat.sampleRate, srcFormat.channelCount == 1,
            srcFormat.commonFormat == .pcmFormatFloat32, !srcFormat.isInterleaved {
             // Fast path: already the target format.
-            while out.count < sampleLimit {
-                let n = min(8192, sampleLimit - out.count)
+            // AVAudioFile.read(into:) throws (bridged as "nilError") when called at end of file
+            // instead of returning 0 frames, so stop at file.length.
+            while out.count < sampleLimit, file.framePosition < file.length {
+                let n = min(8192, sampleLimit - out.count, Int(file.length - file.framePosition))
                 guard let buf = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(n)) else { break }
                 try file.read(into: buf, frameCount: AVAudioFrameCount(n))
                 if buf.frameLength == 0 { break }
@@ -117,8 +119,12 @@ public enum AudioImport {
         }
         var streamEnded = false
         let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
-            if streamEnded { outStatus.pointee = .endOfStream; return nil }
-            let n = min(Int(inNumPackets), 8192)
+            if streamEnded || file.framePosition >= file.length {
+                streamEnded = true
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+            let n = min(Int(inNumPackets), 8192, Int(file.length - file.framePosition))
             guard let buf = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(n)) else {
                 outStatus.pointee = .noDataNow
                 return nil
@@ -126,7 +132,8 @@ public enum AudioImport {
             do {
                 try file.read(into: buf, frameCount: AVAudioFrameCount(n))
             } catch {
-                outStatus.pointee = .noDataNow
+                streamEnded = true
+                outStatus.pointee = .endOfStream
                 return nil
             }
             if buf.frameLength == 0 {
