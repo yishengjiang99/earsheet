@@ -11,6 +11,8 @@ On-device iOS 17+. Microphone or imported audio goes through a fine-tune of Spot
 
 Explainer video (about 90 s): [docs/explainer](docs/explainer/README.md)
 
+Web demo (Basic Pitch in the browser on WebGPU, WebGL or WASM): https://yishengjiang99.github.io/earsheet/ (source in `web/`, deployed by `.github/workflows/pages.yml` once GitHub Pages is enabled)
+
 ## Layout
 
 - `EarSheet.xcodeproj` — app shell, scheme `EarSheet`, team `83D36RPMUM`

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EarSheet web demo: Basic Pitch in the browser</title>
+<meta name="description" content="Polyphonic note transcription (Spotify Basic Pitch) running fully in your browser with WebGPU, WebGL or WASM. Record or upload audio, get a piano roll, staff, and MIDI.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>EarSheet <span class="muted">web demo</span></h1>
+  <p class="lede">Record or upload music and get notes back. The same Basic Pitch model the EarSheet iOS app uses runs here on your device through TensorFlow.js. Your audio never leaves the browser.</p>
+</header>
+
+<main>
+  <section class="card" id="engine">
+    <div class="row">
+      <div><span class="label">Backend</span> <strong id="backend">loading…</strong> <span id="backend-note" class="muted"></span></div>
+      <div><span class="label">Model</span> <span id="model-status">loading…</span></div>
+      <label class="muted small">Force backend
+        <select id="backend-select">
+          <option value="auto">auto (WebGPU → WebGL → WASM)</option>
+          <option value="webgpu">webgpu</option>
+          <option value="webgl">webgl</option>
+          <option value="wasm">wasm</option>
+          <option value="cpu">cpu (slow)</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card" id="input">
+    <h2>1. Audio</h2>
+    <div class="row">
+      <button id="rec-btn" disabled>● Record</button>
+      <label class="button" for="file-input">Upload audio…</label>
+      <input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm" hidden>
+      <button id="sample-btn" disabled>Try a sample (C major)</button>
+      <span id="rec-time" class="muted"></span>
+    </div>
+    <div id="audio-info" class="muted small"></div>
+    <audio id="audio-el" controls hidden></audio>
+  </section>
+
+  <section class="card" id="transcribe">
+    <h2>2. Transcribe</h2>
+    <div class="row">
+      <button id="run-btn" disabled>Transcribe</button>
+      <progress id="progress" max="1" value="0" hidden></progress>
+      <span id="timing" class="muted"></span>
+    </div>
+    <details>
+      <summary>Decoder settings</summary>
+      <div class="row small">
+        <label>Onset threshold <input id="onset-th" type="range" min="0.1" max="0.9" step="0.05" value="0.5"> <output for="onset-th">0.5</output></label>
+        <label>Frame threshold <input id="frame-th" type="range" min="0.1" max="0.9" step="0.05" value="0.3"> <output for="frame-th">0.3</output></label>
+        <label>Min note (ms) <input id="min-note" type="range" min="20" max="300" step="5" value="128"> <output for="min-note">128</output></label>
+      </div>
+      <p class="muted small">Defaults match Spotify's Python defaults and the iOS app. Changing them re-decodes without re-running the model.</p>
+    </details>
+  </section>
+
+  <section class="card" id="results" hidden>
+    <h2>3. Notes</h2>
+    <div class="row">
+      <button id="play-btn">▶ Play notes</button>
+      <button id="play-orig-btn">▶ Play original</button>
+      <button id="stop-btn">■ Stop</button>
+      <button id="midi-btn">Download MIDI</button>
+      <span id="summary" class="muted"></span>
+    </div>
+    <canvas id="roll" height="320"></canvas>
+    <h3>Staff <span class="muted small" id="quant-info"></span></h3>
+    <div id="staff"></div>
+    <details>
+      <summary>Note list</summary>
+      <table id="note-table"><thead><tr><th>#</th><th>Pitch</th><th>MIDI</th><th>Start (s)</th><th>Dur (s)</th><th>Amp</th></tr></thead><tbody></tbody></table>
+    </details>
+  </section>
+
+  <section class="card small muted" id="about">
+    <h2>How it works</h2>
+    <ol>
+      <li>Audio is decoded and resampled to 22,050 Hz mono with an <code>OfflineAudioContext</code>.</li>
+      <li>It is cut into 2-second windows (43,844 samples, 30-frame overlap) and run through Spotify's <a href="https://github.com/spotify/basic-pitch">Basic Pitch</a> (ICASSP 2022, ~0.9 MB TF.js graph) on WebGPU, WebGL or WASM.</li>
+      <li>The note, onset and contour heads are decoded into notes with Basic Pitch's own JS port of <code>note_creation.py</code>.</li>
+      <li>A JS port of EarSheet's quantizer estimates tempo, meter and key and snaps to 16ths for the staff (rendered with abcjs).</li>
+    </ol>
+    <p>Model and decoder: © Spotify AB, Apache-2.0. TensorFlow.js: Apache-2.0. abcjs and @tonejs/midi: MIT. Source: <code>web/</code> in the EarSheet repo.</p>
+  </section>
+</main>
+<script src="vendor/abcjs-basic-min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
