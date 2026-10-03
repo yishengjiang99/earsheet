@@ -16,6 +16,8 @@ struct SheetDetailView: View {
     @State private var showShare = false
     @State private var isPreparingShare = false
     @State private var notice: String?
+    @State private var paywall: PaywallRequest?
+    @ObservedObject private var store = ProStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +60,28 @@ struct SheetDetailView: View {
                 }
                 .accessibilityLabel(library.playingTakeID == take.id && library.isPlaying ? "Pause" : "Play")
 
-                Button(action: prepareShare) {
+                Menu {
+                    Button {
+                        prepareShare(ExportFormat.available(isPro: store.isPro))
+                    } label: {
+                        Label(store.isPro ? "Share all formats" : "Share free formats", systemImage: "square.and.arrow.up")
+                    }
+                    Section {
+                        ForEach(ExportFormat.allCases) { f in
+                            Button {
+                                if f.isProOnly && !store.isPro {
+                                    Telemetry.shared.track(f.telemetryEvent, ["locked": true])
+                                    paywall = PaywallRequest(trigger: .exportLockedRow) { prepareShare([f]) }
+                                } else {
+                                    prepareShare([f])
+                                }
+                            } label: {
+                                Label(f.isProOnly && !store.isPro ? "\(f.title(isPro: false)) (Pro)" : f.title(isPro: store.isPro),
+                                      systemImage: f.isProOnly && !store.isPro ? "lock.fill" : f.systemImage)
+                            }
+                        }
+                    }
+                } label: {
                     if isPreparingShare {
                         ProgressView()
                             .frame(width: 30, height: 30)
@@ -70,7 +93,7 @@ struct SheetDetailView: View {
                 }
                 .disabled(isPreparingShare)
                 .accessibilityLabel("Share")
-                .accessibilityHint("Shares MIDI, MP3, MusicXML, PDF and a photo of the page")
+                .accessibilityHint("Shares the page as PDF, MP3 or a photo; MIDI and MusicXML with Pro")
 
                 Button(action: savePhoto) {
                     Image(systemName: "photo")
@@ -87,6 +110,9 @@ struct SheetDetailView: View {
         .sheet(isPresented: $showShare) {
             ShareSheet(items: shareItems)
         }
+        .sheet(item: $paywall) { req in
+            PaywallView(trigger: req.trigger, onUnlocked: req.onUnlocked)
+        }
         .alert("AI Music Radar", isPresented: Binding(
             get: { notice != nil },
             set: { if !$0 { notice = nil } }
@@ -100,42 +126,48 @@ struct SheetDetailView: View {
 
     // MARK: - Share
 
-    private func prepareShare() {
+    /// Writes the chosen formats to temp files and opens the share sheet. Free tier: the PDF
+    /// covers the first `AppConfig.Free.pdfSeconds`; MIDI/MusicXML are never produced.
+    private func prepareShare(_ formats: [ExportFormat]) {
+        let isPro = store.isPro
+        let formats = formats.filter { isPro || !$0.isProOnly }
+        guard !formats.isEmpty else { return }
         isPreparingShare = true
         Task {
             var items: [Any] = []
             let base = Self.sanitizedFilename(take.title)
             let dir = FileManager.default.temporaryDirectory
+            let pdfTruncated = !isPro && ExportPreview.isLongerThan(take.score, seconds: AppConfig.Free.pdfSeconds)
             do {
-                let midi = MIDISupport.data(for: take.score)
-                let xml = MusicXMLWriter.xml(score: take.score)
-                let pdf = Engraver.pdfData(score: take.score, pageSize: CGSize(width: 612, height: 792))
-                let files: [(String, Data)] = [
-                    ("\(base).mid", midi),
-                    ("\(base).musicxml", Data(xml.utf8)),
-                    ("\(base).pdf", pdf),
-                ]
-                for (name, data) in files {
+                func write(_ name: String, _ data: Data) throws {
                     let url = dir.appendingPathComponent(name, isDirectory: false)
                     try data.write(to: url, options: .atomic)
                     items.append(url)
                 }
-                // MP3: same SF2 synth as playback, LAME-encoded.
-                do {
-                    let mp3 = try await AudioExporter.mp3Data(for: take.score)
-                    let url = dir.appendingPathComponent("\(base).mp3", isDirectory: false)
-                    try mp3.write(to: url, options: .atomic)
-                    items.append(url)
-                } catch {
-                    // Surface only if nothing else could be shared.
-                    if items.isEmpty { throw error }
-                }
-                // Photo of the engraved page.
-                if let image = Self.photoImage(for: take.score),
-                   let png = image.pngData() {
-                    let url = dir.appendingPathComponent("\(base).png", isDirectory: false)
-                    try png.write(to: url, options: .atomic)
-                    items.append(url)
+                for f in formats {
+                    switch f {
+                    case .midi:
+                        try write("\(base).mid", MIDISupport.data(for: take.score))
+                    case .musicXML:
+                        try write("\(base).musicxml", Data(MusicXMLWriter.xml(score: take.score).utf8))
+                    case .pdf:
+                        let score = isPro ? take.score : ExportPreview.truncated(take.score, seconds: AppConfig.Free.pdfSeconds)
+                        let name = pdfTruncated ? "\(base) (first \(Int(AppConfig.Free.pdfSeconds)) s).pdf" : "\(base).pdf"
+                        try write(name, Engraver.pdfData(score: score, pageSize: CGSize(width: 612, height: 792)))
+                    case .mp3:
+                        // Same SF2 synth as playback, LAME-encoded.
+                        do {
+                            let mp3 = try await AudioExporter.mp3Data(for: take.score)
+                            try write("\(base).mp3", mp3)
+                        } catch {
+                            if formats.count == 1 { throw error }
+                        }
+                    case .photo:
+                        if let image = Self.photoImage(for: take.score), let png = image.pngData() {
+                            try write("\(base).png", png)
+                        }
+                    }
+                    Telemetry.shared.track(f.telemetryEvent, ["locked": false, "truncated": f == .pdf && pdfTruncated])
                 }
             } catch {
                 notice = "Could not prepare share files: \(error.localizedDescription)"

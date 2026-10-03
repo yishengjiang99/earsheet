@@ -53,14 +53,32 @@ final class TakeLibrary: ObservableObject {
 
     var userTakes: [Take] { takes }
 
-    func addTake(title: String? = nil, score: QuantizedScore) -> Take {
-        let take = Take(id: UUID(),
-                        title: title ?? "Take \(takes.count + 1)",
-                        createdAt: Date(),
-                        score: score,
-                        isSample: false)
+    /// Free keeps `AppConfig.Free.savedTakes` pieces; Pro is unlimited.
+    func canSaveMore(isPro: Bool) -> Bool {
+        isPro || takes.count < AppConfig.Free.savedTakes
+    }
+
+    /// A take that isn't in the library yet (shown, playable, shareable; saved by `save(_:)`).
+    func makeTake(title: String? = nil, score: QuantizedScore) -> Take {
+        Take(id: UUID(),
+             title: title ?? "Take \(takes.count + 1)",
+             createdAt: Date(),
+             score: score,
+             isSample: false)
+    }
+
+    func isSaved(_ take: Take) -> Bool { takes.contains { $0.id == take.id } }
+
+    func save(_ take: Take) {
+        guard !take.isSample, !isSaved(take) else { return }
         takes.insert(take, at: 0)
         save()
+        Telemetry.shared.track(.takeSaved, ["count": takes.count])
+    }
+
+    func addTake(title: String? = nil, score: QuantizedScore) -> Take {
+        let take = makeTake(title: title, score: score)
+        save(take)
         return take
     }
 
@@ -68,6 +86,7 @@ final class TakeLibrary: ObservableObject {
         stopPlayback()
         takes.removeAll { $0.id == take.id }
         save()
+        Telemetry.shared.track(.takeDeleted, ["count": takes.count])
     }
 
     func clearNotice() { notice = nil }
@@ -111,6 +130,7 @@ final class TakeLibrary: ObservableObject {
                 }
                 playingTakeID = take.id
                 player.play()
+                Telemetry.shared.track(.playbackStart, ["sample": take.isSample])
             } catch {
                 notice = "Playback failed: \(error.localizedDescription)"
             }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import Foundation
+import HearSheet
 import SF2Player
 
 /// Locates the fetched models (app bundle `models/` or a test-time override)
@@ -46,3 +47,64 @@ enum BundledModels {
         }
     }
 }
+
+// MARK: - Transcription model (the one shared loader)
+
+/// The single place the app loads the Basic Pitch Core ML model. Live listening and file import
+/// both go through here, so the package compiles once per process and a swapped-in model
+/// (docs/finetune/IOS_MODEL_HANDOFF.md) only needs a new `models/` folder.
+///
+/// Optional sidecar `models/BasicPitchPoly.profile.json` (shipped with a fine-tuned release):
+/// `{"name": "ft-exp5", "onsetThreshold": 0.7, "frameThreshold": 0.3}`. Without it the stock
+/// decoder defaults are used and the model reports as `stock`.
+enum TranscriptionModel {
+    struct Profile: Codable, Equatable, Sendable {
+        var name: String
+        var onsetThreshold: Float?
+        var frameThreshold: Float?
+
+        static let stock = Profile(name: "stock", onsetThreshold: nil, frameThreshold: nil)
+
+        var thresholds: BasicPitchDecoder.Thresholds {
+            let d = BasicPitchDecoder.Thresholds()
+            return BasicPitchDecoder.Thresholds(onset: onsetThreshold ?? d.onset, frame: frameThreshold ?? d.frame)
+        }
+    }
+
+    static let profileFileName = "BasicPitchPoly.profile.json"
+    private static let box = ModelBox()
+
+    /// Reads the sidecar profile from a models directory (stock if missing or unreadable).
+    static func profile(in dir: URL = BundledModels.modelsDirectory()) -> Profile {
+        let url = dir.appendingPathComponent(profileFileName, isDirectory: false)
+        guard let data = try? Data(contentsOf: url),
+              let p = try? JSONDecoder().decode(Profile.self, from: data) else { return .stock }
+        return p
+    }
+
+    /// Loads (once) and returns the model. Blocking on first use: call off the main thread.
+    static func loadBlocking() throws -> BasicPitchModel {
+        try box.get(modelsDirectory: BundledModels.modelsDirectory())
+    }
+
+    /// Loads the model off the main actor. Cancelling the caller abandons the wait.
+    static func load() async throws -> BasicPitchModel {
+        try await runDetached(priority: .userInitiated) { try loadBlocking() }
+    }
+}
+
+/// Runs `work` on a detached task and forwards the caller's cancellation into it, so
+/// `Task.checkCancellation()` inside the work (e.g. `Transcriber.transcribe`) sees it.
+/// A plain `Task.detached { }.value` never inherits cancellation.
+func runDetached<T>(priority: TaskPriority = .userInitiated,
+                    _ work: @escaping @Sendable () throws -> T) async throws -> T {
+    let task = Task.detached(priority: priority) { UncheckedBox(value: try work()) }
+    return try await withTaskCancellationHandler {
+        try await task.value.value
+    } onCancel: {
+        task.cancel()
+    }
+}
+
+/// Carries a non-Sendable result (Core ML model, note arrays from another module) out of a task.
+struct UncheckedBox<T>: @unchecked Sendable { let value: T }

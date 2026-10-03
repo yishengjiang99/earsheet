@@ -4,8 +4,12 @@ import HearSheet
 import SwiftUI
 
 /// A live-listening take: records from the mic while the streaming
-/// transcriber renders notes in real time. Stopping finalizes the take
+/// transcriber renders notes as they are heard. Stopping finalizes the take
 /// (same trim as the batch path) and hands it to the library.
+///
+/// Limits are explicit: a take stops at `AppConfig.Limits.liveRecordingSeconds` (10 min) and the
+/// screen shows the remaining time near the end and why it stopped. Leaving the screen cancels
+/// everything (model load, mic, final decode).
 @MainActor
 final class ListeningSession: ObservableObject {
     enum Phase: Equatable {
@@ -26,44 +30,73 @@ final class ListeningSession: ObservableObject {
         }
     }
 
+    enum StopReason: String { case user, limit }
+
     @Published private(set) var phase: Phase = .preparing
     @Published private(set) var liveNotes: [NoteEvent] = []
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var level: Float = 0
     @Published private(set) var notice: String?
+    /// The finished take isn't in the library because the free save limit was reached.
+    @Published private(set) var saveBlocked = false
+    @Published private(set) var stoppedAtLimit = false
 
-    private let library: TakeLibrary
+    let library: TakeLibrary
+    let maxSeconds = AppConfig.Limits.liveRecordingSeconds
     private let recorder = AudioRecorder()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
-    private var modelBox = ModelBox()
     private var timer: Timer?
+    private var startTask: Task<Void, Never>?
+    private var cancelled = false
+    private var stopRequestedAt: Date?
+    private var modelName = TranscriptionModel.Profile.stock.name
 
     init(library: TakeLibrary) {
         self.library = library
     }
 
+    var remainingSeconds: Double { max(0, maxSeconds - elapsed) }
+    /// Show the countdown in the last minute.
+    var isNearLimit: Bool { remainingSeconds <= 60 }
+
     func start() {
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard granted else {
-                    self.phase = .failed("Microphone access is denied. Enable it in Settings to listen.")
-                    return
-                }
-                await self.begin()
+        guard startTask == nil, !cancelled else { return }
+        startTask = Task { [weak self] in
+            guard let self else { return }
+            guard await Self.requestMicPermission() else {
+                self.phase = .failed("AI Music Radar needs the microphone to hear the music. Turn it on in Settings › AI Music Radar › Microphone.")
+                return
             }
+            await self.begin()
+        }
+    }
+
+    /// Asks only when undetermined; reports the outcome to telemetry.
+    private static func requestMicPermission() async -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .granted: return true
+        case .denied: return false
+        default:
+            Telemetry.shared.track(.micPermissionPrompt)
+            let granted = await withCheckedContinuation { cont in
+                session.requestRecordPermission { cont.resume(returning: $0) }
+            }
+            Telemetry.shared.track(granted ? .micPermissionGranted : .micPermissionDenied)
+            return granted
         }
     }
 
     private func begin() async {
         // Load the model before opening the mic; inference must keep up live.
-        let box = modelBox
         do {
-            let model = try await Task.detached(priority: .userInitiated) {
-                try box.get(modelsDirectory: BundledModels.modelsDirectory())
-            }.value
-            let streamer = StreamingTranscriber(model: model)
+            let model = try await TranscriptionModel.load()
+            try Task.checkCancellation()
+            guard !cancelled else { return }
+            let profile = TranscriptionModel.profile()
+            modelName = profile.name
+            let streamer = StreamingTranscriber(model: model, thresholds: profile.thresholds)
             self.streamer = streamer
             let queue = self.pumpQueue
             recorder.onLevel = { [weak self] p in
@@ -74,9 +107,15 @@ final class ListeningSession: ObservableObject {
                 streamer.append(samples)
                 queue.async { [weak self] in self?.pumpAndDecode(streamer: streamer) }
             }
+            recorder.onLimitReached = { [weak self] in
+                Task { @MainActor [weak self] in self?.stop(reason: .limit) }
+            }
             try recorder.start()
             phase = .listening
             startTimer()
+            Telemetry.shared.track(.transcriptionStart, ["source": "mic", "model": modelName])
+        } catch is CancellationError {
+            return
         } catch {
             phase = .failed("Could not start listening: \(error.localizedDescription)")
         }
@@ -86,9 +125,10 @@ final class ListeningSession: ObservableObject {
     /// to the main actor to publish.
     private nonisolated func pumpAndDecode(streamer: StreamingTranscriber) {
         do {
-            // Windows complete every ~1.6 s of audio; decode only then.
+            // Windows complete every ~1.6 s of audio; decode only then. The live staff shows a
+            // 10 s window, so decode the recent tail only (flat cost on long takes).
             guard try streamer.pump() > 0 else { return }
-            let notes = streamer.liveNotes()
+            let notes = streamer.liveNotes(tailSeconds: 20)
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.liveNotes = notes
@@ -100,12 +140,18 @@ final class ListeningSession: ObservableObject {
         }
     }
 
-    func stop() {
+    func stop(reason: StopReason = .user) {
         guard case .listening = phase else { return }
         stopTimer()
         recorder.onSamples = nil
         recorder.onLevel = nil
+        recorder.onLimitReached = nil
         let samples = recorder.stop()
+        elapsed = Double(samples.count) / AudioRecorder.targetSampleRate
+        if reason == .limit {
+            stoppedAtLimit = true
+            Telemetry.shared.track(.recordingLimitReached, ["limit_s": maxSeconds])
+        }
         guard !samples.isEmpty else {
             phase = .failed("The take was silent.")
             return
@@ -115,7 +161,9 @@ final class ListeningSession: ObservableObject {
             return
         }
         phase = .writing
+        stopRequestedAt = Date()
         let streamer = self.streamer
+        let duration = elapsed
         pumpQueue.async { [weak self] in
             // Drain remaining audio including the final partial window,
             // then finalize with the batch trim.
@@ -125,20 +173,66 @@ final class ListeningSession: ObservableObject {
                 notes = streamer?.finalize() ?? []
             } catch {
                 Task { @MainActor [weak self] in
-                    self?.phase = .failed("Could not write the page: \(error.localizedDescription)")
+                    guard let self, !self.cancelled else { return }
+                    self.phase = .failed("Could not write the page: \(error.localizedDescription)")
                 }
                 return
             }
             let score = Quantizer.quantize(notes)
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                if score.notes.isEmpty {
-                    self.phase = .failed("No notes found. Try again, closer to the music.")
-                } else {
-                    let take = self.library.addTake(score: score)
-                    self.phase = .done(take)
-                }
+                guard let self, !self.cancelled else { return }
+                self.finish(score: score, duration: duration)
             }
+        }
+    }
+
+    private func finish(score: QuantizedScore, duration: Double) {
+        let latency = stopRequestedAt.map { Date().timeIntervalSince($0) * 1000 } ?? 0
+        Telemetry.shared.track(.transcriptionStop, ["source": "mic", "duration_s": duration.rounded(),
+                                                    "notes": score.notes.count, "model": modelName,
+                                                    "latency_ms": latency.rounded(),
+                                                    "stopped_at_limit": stoppedAtLimit])
+        if score.notes.isEmpty {
+            phase = .failed("No notes found. Try again, closer to the music.")
+            return
+        }
+        let take = library.makeTake(score: score)
+        if library.canSaveMore(isPro: ProStore.shared.isPro) {
+            library.save(take)
+        } else {
+            saveBlocked = true
+        }
+        PaywallGateStore.shared.recordTranscription()
+        if stoppedAtLimit {
+            notice = "Listening stopped at the \(Int(maxSeconds / 60))-minute limit. The page has everything up to there."
+        }
+        phase = .done(take)
+    }
+
+    /// Keeps a take that was over the free limit once the user has Pro.
+    func saveBlockedTake() {
+        guard case .done(let take) = phase, saveBlocked, library.canSaveMore(isPro: ProStore.shared.isPro) else { return }
+        library.save(take)
+        saveBlocked = false
+    }
+
+    /// Leaving the screen: abandon the model load, release the mic, drop the final decode.
+    func cancel() {
+        guard !cancelled else { return }
+        let wasActive: Bool
+        switch phase {
+        case .preparing, .listening, .writing: wasActive = true
+        default: wasActive = false
+        }
+        cancelled = true
+        startTask?.cancel()
+        stopTimer()
+        recorder.onSamples = nil
+        recorder.onLevel = nil
+        recorder.onLimitReached = nil
+        if recorder.isRecording { _ = recorder.stop() }
+        if wasActive {
+            Telemetry.shared.track(.transcriptionCancel, ["source": "mic", "duration_s": elapsed.rounded()])
         }
     }
 
@@ -150,7 +244,8 @@ final class ListeningSession: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
-                if self.elapsed >= Transcriber.maxDurationSeconds { self.stop() }
+                // Backstop for the recorder's own limit callback.
+                if self.elapsed >= self.maxSeconds { self.stop(reason: .limit) }
             }
         }
     }
@@ -164,10 +259,12 @@ final class ListeningSession: ObservableObject {
 // MARK: - View
 
 /// The live-listening screen: instruction text, level meter, a staff that
-/// fills with notes as they are heard, and a stop button.
+/// fills with notes as they are heard, the take timer and a stop button.
 struct ListeningView: View {
     @StateObject var session: ListeningSession
+    @ObservedObject private var store = ProStore.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showPaywall = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -186,7 +283,24 @@ struct ListeningView: View {
         }
         .background(Ink.paper)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if session.phase == .preparing || session.phase == .listening {
+                    Button("Cancel") {
+                        session.cancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
         .onAppear { session.start() }
+        .onDisappear { session.cancel() }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(trigger: .saveLimit) { session.saveBlockedTake() }
+        }
+        .onChange(of: store.isPro) { _, pro in
+            if pro { session.saveBlockedTake() }
+        }
         .alert("AI Music Radar", isPresented: Binding(
             get: { session.notice != nil },
             set: { if !$0 { session.clearNotice() } }
@@ -199,7 +313,7 @@ struct ListeningView: View {
 
     private var listeningBody: some View {
         VStack(spacing: 16) {
-            Text("Play music near your phone — notes appear as they are heard.")
+            Text("Play music near your phone. Notes appear as they're heard, and the page is written when you stop.")
                 .font(.system(.body, design: .serif))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -223,12 +337,20 @@ struct ListeningView: View {
                 .frame(height: 220)
                 .padding(.horizontal, 8)
 
-            HStack(spacing: 8) {
-                Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text(formattedElapsed(session.elapsed))
-                    .font(.system(.body, design: .monospaced))
+            VStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                    Text("\(formatted(session.elapsed)) / \(formatted(session.maxSeconds))")
+                        .font(.system(.body, design: .monospaced))
+                }
+                if session.isNearLimit, session.phase == .listening {
+                    Text("Stops in \(Int(session.remainingSeconds.rounded(.up))) s (\(Int(session.maxSeconds / 60))-minute limit per take)")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
             }
             .padding(.top, 4)
+            .accessibilityElement(children: .combine)
 
             Spacer()
 
@@ -266,6 +388,18 @@ struct ListeningView: View {
                     .padding(.vertical, 14)
                     .background(Ink.teal, in: Capsule())
             }
+            if session.saveBlocked {
+                VStack(spacing: 10) {
+                    Text("Free keeps \(AppConfig.Free.savedTakes) pieces. You can view, play and share this take now, but it won't be saved when you leave.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Keep it with Pro") { showPaywall = true }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Ink.teal)
+                }
+                .padding(.horizontal, 32)
+            }
             Button("Back to library") { dismiss() }
             Spacer()
         }
@@ -277,12 +411,20 @@ struct ListeningView: View {
             Text(message)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
+            if AVAudioSession.sharedInstance().recordPermission == .denied {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .foregroundStyle(Ink.teal)
+            }
             Button("Back to library") { dismiss() }
             Spacer()
         }
     }
 
-    private func formattedElapsed(_ s: Double) -> String {
+    private func formatted(_ s: Double) -> String {
         String(format: "%d:%02d", Int(s) / 60, Int(s) % 60)
     }
 }

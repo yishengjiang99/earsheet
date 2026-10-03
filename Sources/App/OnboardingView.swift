@@ -20,12 +20,12 @@ struct OnboardingView: View {
                 OnboardingPage(
                     art: AnyView(MicArt()),
                     title: "Hear the music.",
-                    text: "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Nothing ever leaves your phone."
+                    text: "Play near your phone: a piano, a guitar, your own singing. AI Music Radar listens and finds the notes. The first time you tap the mic, iOS asks for microphone access. Audio is processed on this phone and never uploaded."
                 ).tag(0)
                 OnboardingPage(
                     art: AnyView(PageArt()),
                     title: "Get the page.",
-                    text: "Watch the score write itself in real time. Play it back, study the engraved page, or share it as MIDI, MP3, MusicXML, PDF, or a photo."
+                    text: "Notes appear while you play, and the full page is written when you stop. Play it back, read the engraved page, and share it as a PDF, MP3 or photo. Pro adds MIDI and MusicXML."
                 ).tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))

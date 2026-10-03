@@ -11,7 +11,10 @@ struct ContentView: View {
             if hasSeenOnboarding {
                 LibraryView(library: library)
             } else {
-                OnboardingView(onDone: { hasSeenOnboarding = true })
+                OnboardingView(onDone: {
+                    hasSeenOnboarding = true
+                    Telemetry.shared.track(.onboardingComplete)
+                })
             }
         }
         .preferredColorScheme(.light)
