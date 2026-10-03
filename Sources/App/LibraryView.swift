@@ -77,7 +77,7 @@ struct LibraryView: View {
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
-                SheetDetailView(take: take, library: library, proStore: proStore)
+                SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -121,7 +121,7 @@ struct LibraryView: View {
                 NavigationStack {
                     ListeningView(session: session, proStore: proStore, triggers: triggers)
                         .navigationDestination(for: Take.self) { take in
-                            SheetDetailView(take: take, library: library, proStore: proStore)
+                            SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
                         }
                 }
             }

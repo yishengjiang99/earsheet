@@ -11,8 +11,15 @@ struct SheetDetailView: View {
     var take: Take
     @ObservedObject var library: TakeLibrary
     @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
 
     @State private var showPianoRoll = false
+    /// Re-record: the existing live-listening flow in a full-screen cover; a saved new take is
+    /// pushed after the cover closes.
+    @State private var listening: ListeningSession?
+    @State private var showListening = false
+    @State private var finishedTake: Take?
+    @State private var newTake: Take?
     @State private var showExport = false
     @State private var notice: String?
 
@@ -65,6 +72,14 @@ struct SheetDetailView: View {
                 .accessibilityLabel("Export")
                 .accessibilityHint("Export PDF, MP3, MIDI, MusicXML or a photo of the page")
 
+                Button(action: startRecording) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Ink.ink)
+                }
+                .accessibilityLabel("Record again")
+                .accessibilityHint("Starts a new recording and opens it as a new take")
+
                 Button(action: savePhoto) {
                     Image(systemName: "photo")
                         .font(.system(size: 28))
@@ -89,6 +104,30 @@ struct SheetDetailView: View {
             Text(notice ?? "")
         }
         .onDisappear { library.stopPlayback() }
+        .fullScreenCover(isPresented: $showListening, onDismiss: {
+            listening = nil
+            if let take = finishedTake {
+                finishedTake = nil
+                newTake = take
+            }
+        }) {
+            if let session = listening {
+                ReRecordCover(session: session, library: library, proStore: proStore, triggers: triggers) { take in
+                    finishedTake = take
+                    showListening = false
+                }
+            }
+        }
+        .navigationDestination(item: $newTake) { take in
+            SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
+        }
+    }
+
+    private func startRecording() {
+        library.stopPlayback()
+        // Same session the library's mic button uses; its free-tier save gate is unchanged.
+        listening = ListeningSession(library: library, proStore: proStore, triggers: triggers)
+        showListening = true
     }
 
     private func savePhoto() {
@@ -154,5 +193,30 @@ struct SheetDetailView: View {
         let key = keyNames[score.key.tonic] + (score.key.isMinor ? " minor" : " major")
         let meter = "\(score.meter.beatsPerBar)/\(score.meter.beatUnit)"
         return "\(Int(score.tempoBPM.rounded())) BPM · \(meter) · \(key) · \(score.notes.count) notes"
+    }
+}
+
+/// The live-listening flow presented from a take. When the new take is saved to the library it
+/// closes and hands the take back; a take held by the free save limit stays here with the
+/// existing paywall and "View sheet music" flow.
+private struct ReRecordCover: View {
+    @ObservedObject var session: ListeningSession
+    @ObservedObject var library: TakeLibrary
+    @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
+    var onSaved: (Take) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ListeningView(session: session, proStore: proStore, triggers: triggers)
+                .navigationDestination(for: Take.self) { take in
+                    SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
+                }
+        }
+        .onChange(of: session.phase) { _, phase in
+            if case .done(let take) = phase, library.takes.contains(where: { $0.id == take.id }) {
+                onSaved(take)
+            }
+        }
     }
 }
