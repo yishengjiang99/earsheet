@@ -70,6 +70,7 @@ struct PaywallView: View {
                 }
             }
             .task {
+                Telemetry.shared.track(.paywallView)
                 await store.loadProducts()
             }
             .alert("AI Music Radar", isPresented: Binding(

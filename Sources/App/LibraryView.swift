@@ -223,11 +223,15 @@ struct LibraryView: View {
                 }
                 try? FileManager.default.removeItem(at: url) // temp copy
                 guard !samples.isEmpty else { return }
+                let durationS = Double(samples.count) / 22_050.0
+                Telemetry.shared.track(.transcriptionStart, ["source": "video"])
                 let notes = try await runCancellableDetached {
                     let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }
                 let score = Quantizer.quantize(notes)
+                Telemetry.shared.track(.transcriptionStop, ["source": "video", "duration_s": durationS,
+                                                            "notes": score.notes.count])
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that video's audio.")
                 } else {
@@ -250,11 +254,15 @@ struct LibraryView: View {
                     try AudioImport.loadMono22050(url: url)
                 }
                 guard !samples.isEmpty else { return }
+                let durationS = Double(samples.count) / 22_050.0
+                Telemetry.shared.track(.transcriptionStart, ["source": "import"])
                 let notes = try await runCancellableDetached {
                     let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }
                 let score = Quantizer.quantize(notes)
+                Telemetry.shared.track(.transcriptionStop, ["source": "import", "duration_s": durationS,
+                                                            "notes": score.notes.count])
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {

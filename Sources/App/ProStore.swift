@@ -12,6 +12,11 @@ import StoreKit
 /// Entitlement = active Pro subscription OR owned Lifetime.
 /// The entitlement is cached locally and refreshed on launch, on
 /// Transaction.updates, and on restore.
+///
+/// Server loop: every verified purchase, restore and Transaction.updates item is
+/// queued for `POST /api/iap/verify` (ServerSync / VerifyQueue, retried until the
+/// server has it). StoreKit stays the source of truth for `isPro`; the server is
+/// the cross-device record.
 @MainActor
 final class ProStore: ObservableObject {
     static let monthlyID = "com.ragnus.pnge.pro.monthly"
@@ -69,6 +74,7 @@ final class ProStore: ObservableObject {
     /// Purchase a product. Returns true if the user is now Pro.
     func purchase(_ product: Product) async -> Bool {
         purchaseError = nil
+        Telemetry.shared.track(.purchaseStart, ["product": product.id])
         do {
             let result = try await product.purchase(options: [
                 .appAccountToken(appAccountToken)
@@ -76,19 +82,27 @@ final class ProStore: ObservableObject {
             switch result {
             case .success(let verification):
                 let transaction = try checked(verification)
+                ServerSync.report(transaction.id, transaction.appAccountToken, verification.jwsRepresentation)
                 await transaction.finish()
                 await refreshEntitlement()
+                Telemetry.shared.track(.purchaseSuccess, ["product": product.id])
                 return isPro
             case .userCancelled:
+                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "cancelled"])
                 return false
             case .pending:
                 purchaseError = "Purchase is pending approval."
+                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "pending"])
                 return false
             @unknown default:
+                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "unknown"])
                 return false
             }
         } catch {
             purchaseError = "Purchase failed: \(error.localizedDescription)"
+            // StoreKit error code only, never the message text.
+            Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "error",
+                                                   "code": (error as NSError).code])
             return false
         }
     }
@@ -100,9 +114,12 @@ final class ProStore: ObservableObject {
             try await AppStore.sync()
         } catch {
             purchaseError = "Restore failed: \(error.localizedDescription)"
+            Telemetry.shared.track(.restore, ["result": "fail", "code": (error as NSError).code])
             return false
         }
+        let restored = await reportCurrentEntitlements()
         await refreshEntitlement()
+        Telemetry.shared.track(.restore, ["result": isPro ? "success" : "none", "restored": restored])
         if !isPro {
             purchaseError = "No Pro purchase found on this Apple ID."
         }
@@ -129,10 +146,22 @@ final class ProStore: ObservableObject {
         cache.lastRefresh = Date()
     }
 
+    /// Queues the JWS of every verified current entitlement for the server. Returns the count.
+    private func reportCurrentEntitlements() async -> Int {
+        var count = 0
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
+            ServerSync.report(transaction.id, transaction.appAccountToken, result.jwsRepresentation)
+            count += 1
+        }
+        return count
+    }
+
     private func listenForTransactions() async {
         for await result in Transaction.updates {
             do {
                 let transaction = try checked(result)
+                ServerSync.report(transaction.id, transaction.appAccountToken, result.jwsRepresentation)
                 await transaction.finish()
                 await refreshEntitlement()
             } catch {
@@ -154,15 +183,7 @@ final class ProStore: ObservableObject {
 
     /// Per-install token sent with every purchase so the server can link
     /// transactions to this install. Generated once, stored in UserDefaults.
-    var appAccountToken: UUID {
-        let key = "pro.appAccountToken"
-        if let s = UserDefaults.standard.string(forKey: key), let u = UUID(uuidString: s) {
-            return u
-        }
-        let u = UUID()
-        UserDefaults.standard.set(u.uuidString, forKey: key)
-        return u
-    }
+    var appAccountToken: UUID { InstallIdentity.appAccountToken }
 }
 
 enum ProStoreError: Error {

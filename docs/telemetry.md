@@ -1,7 +1,7 @@
 # Telemetry (product analytics)
 
 Endpoint: `POST https://grepawk.com/music-radar/api/telemetry/batch` (code: `server/src/telemetry.ts`). Admin view: the Telemetry tab in the admin panel.
-Status: the server is live. **The client isn't built yet.**
+Status: the server is live. The iOS client is `Sources/App/Telemetry.swift` (branch `agent/ios-server`): it sends `app_open`, `session_start`, `transcription_start`, `transcription_stop`, `paywall_view`, `purchase_start`, `purchase_success`, `purchase_fail` (`reason` cancelled/pending/error, `code`) and `restore` (`result`, `restored`). Properties are allow-listed (`cold`, `source`, `duration_s`, `notes`, `product`, `reason`, `code`, `result`, `restored`). Flushed on each heartbeat (foreground + every 5 min) and on background.
 
 ## Rules (server-enforced)
 - **No audio and no PII.** Property keys that look like PII are dropped (email, phone, name, address, location/lat/lon, ip, token, password, audio, recording, waveform, samples, transcript_text, idfa…), as are string values that look like emails or phone numbers. Never send note content, file names, or titles.

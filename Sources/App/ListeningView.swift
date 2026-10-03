@@ -79,6 +79,7 @@ final class ListeningSession: ObservableObject {
                 queue.async { [weak self] in self?.pumpAndDecode(streamer: streamer) }
             }
             try recorder.start()
+            Telemetry.shared.track(.transcriptionStart, ["source": "mic"])
             phase = .listening
             startTimer()
         } catch {
@@ -110,11 +111,14 @@ final class ListeningSession: ObservableObject {
         recorder.onSamples = nil
         recorder.onLevel = nil
         let samples = recorder.stop()
+        let durationS = Double(samples.count) / 22_050.0
         guard !samples.isEmpty else {
+            Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": "silent"])
             phase = .failed("The take was silent.")
             return
         }
         guard Transcriber.peakLevel(of: samples) >= 0.02 else {
+            Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": "too_quiet", "duration_s": durationS])
             phase = .failed("Too quiet to transcribe. Try again, closer to the music.")
             return
         }
@@ -138,6 +142,8 @@ final class ListeningSession: ObservableObject {
             }
             let score = Quantizer.quantize(notes)
             Task { @MainActor [weak self] in
+                Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": score.notes.isEmpty ? "no_notes" : "ok",
+                                                            "duration_s": durationS, "notes": score.notes.count])
                 guard let self else { return }
                 if score.notes.isEmpty {
                     self.phase = .failed("No notes found. Try again, closer to the music.")
