@@ -2,7 +2,7 @@
 import Foundation
 
 /// A detected note: onset/offset in seconds, MIDI pitch, strike velocity.
-public struct NoteEvent: Equatable, Sendable {
+public struct NoteEvent: Equatable, Sendable, Codable, Hashable {
     public var onset: Double
     public var offset: Double
     public var midi: Int
@@ -17,7 +17,7 @@ public struct NoteEvent: Equatable, Sendable {
 }
 
 /// Meter estimated from onset IOIs. One of 4/4, 3/4, 6/8.
-public struct Meter: Equatable, Sendable {
+public struct Meter: Equatable, Sendable, Codable, Hashable {
     /// Beats per bar (4, 3, or 6).
     public var beatsPerBar: Int
     /// Note value that gets one beat: 4 = quarter, 8 = eighth.
@@ -32,7 +32,7 @@ public struct Meter: Equatable, Sendable {
 }
 
 /// Key estimated from the pitch-class histogram.
-public struct MusicalKey: Equatable, Sendable {
+public struct MusicalKey: Equatable, Sendable, Codable, Hashable {
     /// Pitch class of the tonic, 0 = C.
     public var tonic: Int
     public var isMinor: Bool
@@ -51,7 +51,7 @@ public struct MusicalKey: Equatable, Sendable {
 }
 
 /// A note snapped to the 16th-note grid. Ticks are in sixteenths from piece start.
-public struct QuantizedNote: Equatable, Sendable {
+public struct QuantizedNote: Equatable, Sendable, Codable, Hashable {
     public var midi: Int
     public var velocity: Int
     public var start16: Int
@@ -68,7 +68,7 @@ public struct QuantizedNote: Equatable, Sendable {
 }
 
 /// The full transcription result: quantized notes plus the estimated musical context.
-public struct QuantizedScore: Equatable, Sendable {
+public struct QuantizedScore: Equatable, Sendable, Codable, Hashable {
     public var notes: [QuantizedNote]
     /// Quarter-note beats per minute.
     public var tempoBPM: Double

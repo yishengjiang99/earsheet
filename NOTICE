@@ -42,7 +42,16 @@ Third-party components
 
    Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
 
-2. GeneralUser GS SoundFont 2.0.2 (GeneralUser-GS.sf2)
+2. LAME MP3 encoder 3.100 (Packages/LAME, vendored libmp3lame sources)
+   https://lame.sourceforge.io
+   Copyright 1999-2017 The LAME Project — GNU Library General Public
+   License 2.0 (LGPL-2.0-or-later; see the upstream COPYING). Used only for
+   the "Download MP3" export (Swift wrapper: Sources/App/MP3Encoder.swift).
+   Only the encoder library sources are vendored; the decoder (mpglib),
+   CLI frontend and x86 SIMD paths are excluded. Build notes and the file
+   list are in Packages/LAME/VENDOR.md.
+
+3. GeneralUser GS SoundFont 2.0.2 (GeneralUser-GS.sf2)
    Copyright 1997-2025 by S. Christian Collins
    https://www.schristiancollins.com
    https://github.com/mrbumpy409/GeneralUser-GS

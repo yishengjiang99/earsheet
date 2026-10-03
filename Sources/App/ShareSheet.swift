@@ -28,7 +28,8 @@ struct AudioImporter: UIViewControllerRepresentable {
     }
 }
 
-/// System share sheet for the MIDI, MusicXML and PDF exports.
+/// System share sheet for the exports: MIDI, MP3, MusicXML, PDF and the
+/// page photo. "Download" on iOS is Save to Files from this sheet.
 struct ShareSheet: UIViewControllerRepresentable {
     var items: [Any]
 

@@ -10,6 +10,7 @@
 		F00000000000000000000005 /* HearSheet in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000003 /* HearSheet */; };
 		F00000000000000000000006 /* SF2Player in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000004 /* SF2Player */; };
 		F00000000000000000000008 /* HearSheet in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000003 /* HearSheet */; };
+		F0000000000000000000000B /* LAME in Frameworks */ = {isa = PBXBuildFile; productRef = F0000000000000000000000A /* LAME */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +34,7 @@
 			files = (
 				F00000000000000000000005 /* HearSheet in Frameworks */,
 				F00000000000000000000006 /* SF2Player in Frameworks */,
+				F0000000000000000000000B /* LAME in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -163,6 +165,7 @@
 			packageReferences = (
 				F00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HearSheet" */,
 				F00000000000000000000002 /* XCLocalSwiftPackageReference "Packages/SF2Player" */,
+				F00000000000000000000009 /* XCLocalSwiftPackageReference "Packages/LAME" */,
 			);
 			productRefGroup = E40000000000000000000004 /* Products */;
 			projectDirPath = "";
@@ -274,6 +277,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "AI Music Radar";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AI Music Radar listens on this phone and writes the page here. The recording stays on the device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "AI Music Radar saves the sheet music photo to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -301,6 +305,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "AI Music Radar";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AI Music Radar listens on this phone and writes the page here. The recording stays on the device.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "AI Music Radar saves the sheet music photo to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -394,6 +399,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/SF2Player;
 		};
+		F00000000000000000000009 /* XCLocalSwiftPackageReference "Packages/LAME" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LAME;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -406,6 +415,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F00000000000000000000002 /* XCLocalSwiftPackageReference "Packages/SF2Player" */;
 			productName = SF2Player;
+		};
+		F0000000000000000000000A /* LAME */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F00000000000000000000009 /* XCLocalSwiftPackageReference "Packages/LAME" */;
+			productName = LAME;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
