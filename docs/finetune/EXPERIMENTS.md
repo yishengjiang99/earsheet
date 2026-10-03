@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Current status (2026-10-03 11:30 PT):** E5 probes running (onset pos weight 0.3); pw 0.03 beat stock on mixed val (0.813 vs 0.804). Full history: Status log at the bottom (append-only).
+**Current status (2026-10-03 11:26 PT):** E5: ft-probe-pw0.3.log, final evaluation, epoch 0/1, 10 min since start. Last: [val-f1] epoch 1: note F1 0.6012 P 0.514 R 0.747 (best 0.8039). Full history: Status log at the bottom (append-only).
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
@@ -107,3 +107,4 @@ original wording.
 | 2026-10-03 11:15 | E4b | Status: "running E4b, final evaluation on test sets, epoch 3/8, 13 min elapsed. Last: [val-f1] epoch 3: note F1 0.2623 P 0.186 R 0.530 (best 0.8039)" | 0470760 |
 | 2026-10-03 11:25 | E5 probes | Status: "E5 probes (onset positive weight 0.1/0.03/0.3, 1 epoch each)" | 5071e35 |
 | 2026-10-03 11:30 | E4b result, E5 probes | E4b (class-balanced onset loss, pos weight 0.95): mixed val 0.384, 0.272, 0.262 (P 0.19-0.30) and stopped; it over-predicts onsets the other way. Probes, 1 epoch each, all data, lr 3e-5: **pw 0.03: 0.8132 (P 0.782 R 0.866), first run to beat stock 0.8039**; pw 0.1: 0.7467 (P 0.682 R 0.845); pw 0.3 running. Next: full E6 run with pw 0.03 | (this commit) |
+| 2026-10-03 11:26 | e5 | Status (auto): E5: ft-probe-pw0.3.log, final evaluation, epoch 0/1, 10 min since start. Last: [val-f1] epoch 1: note F1 0.6012 P 0.514 R 0.747 (best 0.8039) | (auto) |
