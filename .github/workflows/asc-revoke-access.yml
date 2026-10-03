@@ -1,0 +1,111 @@
+name: ASC revoke tester + team access
+
+# Account-wide (all apps on the ASC account): removes the given emails from TestFlight (deletes their
+# betaTester records, so every beta group of every app), deletes them as App Store Connect team users
+# and cancels pending user invitations. PROTECTED emails and the Account Holder are never touched.
+# dry_run (default true) only prints what would change. Approved by the owner 2026-10-03.
+
+on:
+  workflow_dispatch:
+    inputs:
+      emails:
+        description: Comma-separated emails to revoke
+        required: true
+        type: string
+      dry_run:
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  revoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revoke
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          EMAILS: ${{ inputs.emails }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PROTECTED: yisheng.jiang@gmail.com,yisheng@fundrx.co,yisheng@appdog.com
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography
+          python3 <<'PY'
+          import json, os, time, urllib.request, urllib.error, urllib.parse
+          import jwt
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          token = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200,
+                              'aud': 'appstoreconnect-v1'}, p8, algorithm='ES256',
+                             headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          class ApiError(Exception): pass
+          def api(method, path, body=None):
+            req = urllib.request.Request('https://api.appstoreconnect.apple.com' + path, method=method,
+                                         data=None if body is None else json.dumps(body).encode(),
+                                         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+            try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read().decode() or '{}')
+            except urllib.error.HTTPError as e:
+              raise ApiError(f'{method} {path} -> {e.code}: {e.read().decode()[:1500]}')
+          def pages(path):
+            out = []
+            while path:
+              _, p = api('GET', path)
+              out += p.get('data', [])
+              nxt = p.get('links', {}).get('next')
+              path = nxt.replace('https://api.appstoreconnect.apple.com', '') if nxt else None
+            return out
+          dry = os.environ.get('DRY_RUN', 'true').lower() != 'false'
+          protected = {e.strip().lower() for e in os.environ['PROTECTED'].split(',') if e.strip()}
+          targets = {e.strip().lower() for e in os.environ['EMAILS'].split(',') if e.strip()} - protected
+          print('dry_run', dry, 'targets', sorted(targets))
+          errors = []
+
+          def report(tag):
+            for app in pages('/v1/apps?limit=200'):
+              name = app['attributes'].get('name'); bid = app['attributes'].get('bundleId')
+              for g in pages(f"/v1/apps/{app['id']}/betaGroups?limit=200"):
+                emails = sorted((t['attributes'].get('email') or '?') for t in pages(f"/v1/betaGroups/{g['id']}/betaTesters?limit=200"))
+                print(f"[{tag}] {name} ({bid}) group '{g['attributes'].get('name')}' internal={g['attributes'].get('isInternalGroup')}: {emails}")
+          report('before')
+
+          # 1) TestFlight: delete the betaTester records (removes them from every group of every app).
+          for email in sorted(targets):
+            for t in pages('/v1/betaTesters?limit=200&filter[email]=' + urllib.parse.quote(email)):
+              if (t['attributes'].get('email') or '').lower() != email: continue
+              print('betaTester', email, t['id'], 'DELETE' if not dry else '(dry run)')
+              if not dry:
+                try: print('  ->', api('DELETE', f"/v1/betaTesters/{t['id']}")[0])
+                except ApiError as e: errors.append(str(e)); print('  ERROR', e)
+
+          # 2) Team users (never the Account Holder or protected emails).
+          for u in pages('/v1/users?limit=200'):
+            a = u['attributes']; email = (a.get('username') or '').lower()
+            if email not in targets: continue
+            if 'ACCOUNT_HOLDER' in (a.get('roles') or []) or email in protected:
+              print('SKIP protected user', email); continue
+            print('user', email, u['id'], a.get('roles'), 'DELETE' if not dry else '(dry run)')
+            if not dry:
+              try: print('  ->', api('DELETE', f"/v1/users/{u['id']}")[0])
+              except ApiError as e: errors.append(str(e)); print('  ERROR', e)
+
+          # 3) Pending invitations.
+          for inv in pages('/v1/userInvitations?limit=200'):
+            email = (inv['attributes'].get('email') or '').lower()
+            if email not in targets: continue
+            print('invitation', email, inv['id'], 'DELETE' if not dry else '(dry run)')
+            if not dry:
+              try: print('  ->', api('DELETE', f"/v1/userInvitations/{inv['id']}")[0])
+              except ApiError as e: errors.append(str(e)); print('  ERROR', e)
+
+          report('after')
+          print('remaining team users:')
+          for u in pages('/v1/users?limit=200'):
+            a = u['attributes']; print('  ', a.get('username'), a.get('roles'))
+          if errors:
+            print('ERRORS:'); [print('  ', e) for e in errors]
+            raise SystemExit(1)
+          PY
