@@ -36,10 +36,20 @@ stock. SMD was not in its training data, so SMD is the primary real-audio check.
 
 ## Results
 
-| exp | change | val F1 | test-gugs | test-fluidr3 | real sets | notes |
-|---|---|---|---|---|---|---|
-| E0 | stock ICASSP 2022 | 0.879 (mixed val 0.804) | 0.861 (P 0.79 R 0.95) | 0.901 | GuitarSet 0.802 (0.822 @ onset 0.7); MAESTRO 0.695 (0.716 @ onset 0.6) | baseline. Higher onset thresholds help stock on real audio |
-| E1 | original script defaults (2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes) | 0.670 (best epoch 0.727) | - | - | - | precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept |
+Columns are onset-F1 on held-out sets. "mixed val" = synth val + GuitarSet val + MAESTRO val (108 clips).
+
+| exp | change | mixed val | test-gugs | test-fluidr3 | test-multi-fluidr3 | GuitarSet p05 (real) | MAESTRO test (real) | SMD test (real) | size | notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E0 | stock ICASSP 2022, thresholds 0.5/0.3 | 0.804 | 0.861 | 0.901 | 0.646 | 0.802 | 0.695 | (E4 run) | 742 KB tfjs bin | baseline |
+| E0t | stock, onset threshold 0.7 / frame 0.3 (tuned on mixed val) | - | **0.892** | **0.922** | **0.715** | **0.822** | **0.701** | (E4 run) | same | free win: higher onset threshold cuts false onsets everywhere (P 0.79 to 0.84 on gugs, 0.77 to 0.82 on GuitarSet) |
+| E2 | fixed trainer (plain BCE, BN frozen, warmup+cosine 1e-4, gain/EQ/reverb/noise aug), 400 GUGS piano etudes | 0.673 (ep1) / 0.673 / 0.666 | (kept stock) | | | | | | | early stop at epoch 3, never beat stock 0.804, stock kept. A side check of the epoch-2 weights: synth val 0.827 (0.916 at tuned thresholds) but MAESTRO val fell from about 0.70 to 0.52. Synthetic-piano-only fine-tuning overfits the renderer timbre and hurts real piano |
+| E1 | original script defaults (2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes) | synth val only: 0.670 (best epoch 0.727) vs stock 0.879 | | | | | | | | precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept |
+
+## Next
+
+- E4 (running): all data (synthetic GUGS + 7-SoundFont multi-instrument + real GuitarSet/MAESTRO/SMD train), lr 3e-5 (lower after E2 drifted at 1e-4)
+- E3: multi-SoundFont synthetic only (ablation)
+- Candidates are published as GitHub release assets (see "Artifacts" below).
 
 ## Plan
 

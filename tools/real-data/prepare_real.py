@@ -113,14 +113,15 @@ def piece_split(name: str, test_frac: float) -> str:
 def do_smd(a) -> dict:
     src = Path(a.src)
     counts = {"train": 0, "test": 0}
-    wavs = sorted(src.rglob("*.wav")) + sorted(src.rglob("*.mp3"))
-    for w in wavs:
-        mids = [w.with_suffix(e) for e in (".mid", ".midi")]
-        mids += [Path(str(p)) for p in src.rglob(w.stem + ".mid")]
-        mid = next((m for m in mids if m.exists()), None)
+    # SMD v2 ships the real recordings (wav_44100_stereo, wav_22050_mono) and also a
+    # MIDI-synth render (midi_wav_22050_mono); only use the real ones.
+    audio_dir = src / "wav_22050_mono" if (src / "wav_22050_mono").is_dir() else src
+    for w in sorted(audio_dir.glob("*.wav")):
+        mid = next((m for m in (src / "midi" / f"{w.stem}.mid", w.with_suffix(".mid")) if m.exists()), None)
         if mid is None:
             continue
-        split = piece_split(w.stem, a.test_frac)
+        work = w.stem.rsplit("_", 2)[0]  # e.g. Chopin_Op028-03: split by work, not take
+        split = piece_split(work, a.test_frac)
         counts[split] += write_chunks(decode(w), midi_file_notes(str(mid)),
                                       Path(a.out) / f"smd-{split}", f"smd_{w.stem}", a.chunk_seconds)
     return counts
