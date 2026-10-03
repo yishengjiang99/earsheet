@@ -673,6 +673,12 @@ def main() -> int:
         raise SystemExit("missing --val dir(s)")
     if args.mic_gate is not None and not args.mic_gate.is_dir():
         raise SystemExit(f"missing --mic-gate dir {args.mic_gate}")
+    # Resolve user paths before moving to the repo root.
+    args.pairs = [d.resolve() for d in args.pairs]
+    args.val = [d.resolve() for d in args.val]
+    args.test = [d.resolve() for d in args.test]
+    if args.mic_gate is not None:
+        args.mic_gate = args.mic_gate.resolve()
     os.chdir(ROOT)
     if smoke() != 0:
         return 1

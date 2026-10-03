@@ -372,6 +372,8 @@ def main() -> None:
                     help="probability of fluidsynth reverb on (default: fluidsynth's default)")
     ap.add_argument("--chorus-prob", type=float, default=None,
                     help="probability of fluidsynth chorus on (default: fluidsynth's default)")
+    ap.add_argument("--pitch-range", type=int, nargs=2, metavar=("LO", "HI"), default=None,
+                    help="octave-fold generated notes into [LO, HI] (e.g. 40 88 for a guitar SF2)")
     ap.add_argument("--jobs", type=int, default=1, help="parallel fluidsynth renders")
     args = ap.parse_args()
 
@@ -392,6 +394,19 @@ def main() -> None:
         mid_path = os.path.join(args.out, stem + ".mid")
         if args.velocity_range:
             notes = remap_velocity(notes, *args.velocity_range)
+        if args.pitch_range:
+            lo, hi = args.pitch_range
+            folded, seen = [], set()
+            for n in notes:
+                m = n[0]
+                while m < lo:
+                    m += 12
+                while m > hi:
+                    m -= 12
+                if (m, n[1]) not in seen:
+                    seen.add((m, n[1]))
+                    folded.append((m,) + tuple(n[1:]))
+            notes = folded
         chans = None
         if args.programs:
             notes, chans = assign_instruments(notes, vrng, args.programs, args.multi_instrument)
