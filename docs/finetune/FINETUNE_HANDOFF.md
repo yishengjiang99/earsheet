@@ -227,3 +227,75 @@ end and I/O.
 **Run C (distillation, only if B wins or stalls).**
 - MT3 / Onsets-and-Frames soft labels on real + unlabeled phone audio; same student, same gates as B.
 - *Success:* +0.03 on piano mic audio over tuned stock.
+
+## 6. Refined goal: velocity, loudness, note-off, MIDI record/playback (2026-10-03)
+
+User-refined goal: ship a refined model based on stock Basic Pitch that detects
+polyphonic music from audio — pitch, velocity, loudness, note-on and note-off —
+encoded into a MIDI file for record and playback. The October effort (§§1-5) optimized
+onset pitch F1 with offsets ignored and never measured velocity; this section records
+what the app already does, where the gap is, and how the strategy changes.
+
+### 6.1 What the app already does (audit of main, 2026-10-03)
+
+The velocity chain is complete and preserving end to end; nothing normalizes it:
+
+| stage | file | behavior |
+|---|---|---|
+| decode | `Packages/HearSheet/Sources/HearSheet/BasicPitchDecoder.swift` | per-note `amplitude` = mean note-posterior over the note's frames |
+| transcribe | `Transcriber.swift` / `StreamingTranscriber.swift` | `velocity = clamp(1..127, round(127 * amplitude))` |
+| quantize | `Quantize.swift` | velocity preserved into `QuantizedNote` |
+| MIDI write | `SMFWriter.swift` | note-on `0x90` carries per-note velocity; note-off `0x80` vel 0; conductor track + program change; shared by playback and export via `MIDISupport.data(for:)` in `TakeLibrary.swift` |
+| playback | `TakeLibrary.swift` → `SF2MIDIPlayer` → `Sf2SynthEngine.pickRegions` | SF2 regions filtered by velocity range; velocity drives voice gain — dynamics are audible |
+| web demo | `web/app.js` | velocity = amplitude (0..1); playback gain `0.15 + 0.5*v`; Tone.js note velocity clamped |
+
+### 6.2 The gap
+
+The velocity *estimate* is uncalibrated: `amplitude` is the mean note-posterior (model
+confidence), not audio energy. A quiet-but-clear note scores posterior ~0.95 →
+velocity ~121; a loud-but-noisy note can score lower. Dynamics in the MIDI file and in
+playback therefore track confidence, not loudness. Offsets were never measured (the
+§1.8 metric ignores them) and there is no velocity metric at all.
+
+### 6.3 Loudness scoping
+
+In MIDI, per-note loudness *is* velocity. Continuous loudness inside a note (a swell
+on a sustained tone) is CC7/CC11, not velocity — relevant only for sustained
+instruments (strings, winds, organ). Piano/guitar notes cannot get louder after the
+attack, so velocity covers them fully. Decision: ship velocity first; CC11 expression
+curves are a later ticket, only if sustained instruments are in scope.
+
+### 6.4 Strategy changes vs §4
+
+- **Scorecard first:** onset F1 (50 ms) + offset-aware F1 + velocity MAE on matched
+  notes + dynamics correlation (playback loudness contour vs recording). Without this,
+  runs optimize pitch and silently regress the rest.
+- **Velocity via calibrated energy mapping (no model change):** replace
+  `127 * posterior-mean` with a curve fit on MAESTRO/SMD true velocities, using
+  per-note audio energy (RMS over the note's frames). This is the velocity analog of
+  the §2 lesson 1 (decoder tuning beat every fine-tune).
+- **Calibrate relative, per performance:** phone AGC/compression destroys absolute
+  level, so normalize to each recording's dynamic range instead of fitting an
+  absolute dB→velocity map.
+- **Velocity is greenfield for stock:** the §2 lesson 4 ("a few hundred real chunks
+  add little and invite forgetting") was about pitch/onset, where stock was already
+  trained on GuitarSet/MAESTRO. Stock knows nothing about velocity — real velocity
+  labels are pure gain with no forgetting risk. Synthetic FluidSynth renders (exact
+  velocity labels) become useful again for pre-training.
+- **Distillation moves up:** MT3 emits velocity and has good note-offs; one
+  distillation run teaches both missing pieces, with soft targets that also fix the
+  onset-calibration problem from §1.6. Ranked just behind the mic-eval set now.
+- **Mic-eval set is more urgent:** phone processing distorts amplitude, which is
+  exactly what velocity reads. Run A clips should include known-velocity performances
+  (MAESTRO MIDI through a speaker, or Disklavier) so velocity has ground truth too.
+
+### 6.5 Shipping sequence
+
+1. Tuned decoder thresholds on iOS (`agent/ios-thresholds` ticket — already
+   validated, reads `decoder-thresholds.json` from release `model-latest`).
+2. Velocity via calibrated energy mapping, wired through the existing MIDI writer;
+   no weight changes.
+3. Audible-dynamics check on device: transcribe something with obvious dynamics,
+   confirm playback reproduces them.
+4. Only then: new heads or MT3 distillation — ship weights only if they beat tuned
+   stock on the mic set under the §6.4 scorecard.
