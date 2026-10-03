@@ -26,6 +26,11 @@ final class ImportTranscriptionTests: XCTestCase {
             return
         }
 
+        // Per-model thresholds: the pinned stock package carries its tuned sidecar (models.lock).
+        XCTAssertTrue(model.thresholdsFromSidecar, "BasicPitchPoly.thresholds.json missing next to the package")
+        XCTAssertEqual(model.thresholds,
+                       BasicPitchDecoder.Thresholds(onset: 0.7, frame: 0.4, minNoteLenFrames: 5))
+
         let notes = try Transcriber.transcribe(samples: samples, model: model)
         let midis = Set(notes.map(\.midi))
         XCTAssertTrue(midis.contains(60) && midis.contains(64) && midis.contains(67),

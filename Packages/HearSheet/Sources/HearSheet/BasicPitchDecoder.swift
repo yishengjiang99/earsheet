@@ -7,16 +7,56 @@ import Foundation
 ///
 /// The model graph is unchanged: note [time, 88], onset [time, 88],
 /// contour [time, 264] heads over MIDI 21–108 (A0–C8).
-/// Defaults are Spotify's; `Thresholds` exists for debug use only.
+/// Thresholds are per model: `BasicPitchModel` reads them from the model's sidecar
+/// (`<models>/BasicPitchPoly.thresholds.json`, pinned in models.lock) at load time, and
+/// `Transcriber` / `StreamingTranscriber` decode with `model.thresholds`. A model without a
+/// sidecar falls back to Spotify's documented defaults (`Thresholds.basicPitchDefaults`).
 public enum BasicPitchDecoder {
     public struct Thresholds: Equatable, Sendable {
-        /// Spotify `DEFAULT_ONSET_THRESHOLD`.
-        public var onset: Float = 0.5
-        /// Spotify `DEFAULT_FRAME_THRESHOLD`.
-        public var frame: Float = 0.3
-        public init(onset: Float = 0.5, frame: Float = 0.3) {
+        public var onset: Float
+        public var frame: Float
+        /// Notes this many frames or shorter are dropped (86.13 frames/s).
+        public var minNoteLenFrames: Int
+
+        public init(onset: Float, frame: Float, minNoteLenFrames: Int) {
             self.onset = onset
             self.frame = frame
+            self.minNoteLenFrames = minNoteLenFrames
+        }
+
+        /// Spotify basic-pitch defaults (`DEFAULT_ONSET_THRESHOLD` 0.5, `DEFAULT_FRAME_THRESHOLD` 0.3,
+        /// `DEFAULT_MIN_NOTE_LEN` 11). Used only for a model that ships no thresholds sidecar.
+        public static let basicPitchDefaults = Thresholds(onset: 0.5, frame: 0.3, minNoteLenFrames: 11)
+
+        /// Sidecar file name for a model package: `BasicPitchPoly.mlpackage` -> `BasicPitchPoly.thresholds.json`.
+        public static func sidecarURL(forPackageAt packageURL: URL) -> URL {
+            packageURL.deletingLastPathComponent()
+                .appendingPathComponent(packageURL.deletingPathExtension().lastPathComponent + ".thresholds.json")
+        }
+
+        /// Parses a sidecar (the `decoder-thresholds.json` format attached to model releases:
+        /// `onset_threshold`, `frame_threshold`, optional `min_note_len_frames`).
+        /// Returns nil if the JSON is malformed or a value is out of range.
+        public static func parse(_ data: Data) -> Thresholds? {
+            struct Sidecar: Decodable {
+                var onset_threshold: Double
+                var frame_threshold: Double
+                var min_note_len_frames: Int?
+            }
+            guard let s = try? JSONDecoder().decode(Sidecar.self, from: data) else { return nil }
+            let minLen = s.min_note_len_frames ?? basicPitchDefaults.minNoteLenFrames
+            guard s.onset_threshold > 0, s.onset_threshold < 1, s.frame_threshold > 0, s.frame_threshold < 1,
+                  (1...1000).contains(minLen) else { return nil }
+            return Thresholds(onset: Float(s.onset_threshold), frame: Float(s.frame_threshold), minNoteLenFrames: minLen)
+        }
+
+        /// Thresholds for the package at `packageURL`: its sidecar, or `basicPitchDefaults`
+        /// when the sidecar is missing or invalid.
+        public static func load(forPackageAt packageURL: URL) -> (thresholds: Thresholds, fromSidecar: Bool) {
+            if let data = try? Data(contentsOf: sidecarURL(forPackageAt: packageURL)), let t = parse(data) {
+                return (t, true)
+            }
+            return (basicPitchDefaults, false)
         }
     }
 
@@ -32,7 +72,6 @@ public enum BasicPitchDecoder {
         public var pitchBend: [Int]?
     }
 
-    static let minNoteLen = 11        // Spotify DEFAULT_MIN_NOTE_LEN (frames)
     static let energyTolerance = 11   // Spotify ENERGY_TOLERANCE (trailing frames)
     static let maxFreqIdx = 87
     static let midiOffset = 21
@@ -43,7 +82,7 @@ public enum BasicPitchDecoder {
     ///   - contour: contour-head posterior, [time][264].
     /// - Returns: decoded notes, sorted by (start, end, pitch) like Spotify.
     public static func decode(frames: [[Float]], onset: [[Float]], contour: [[Float]],
-                              thresholds: Thresholds = Thresholds()) -> [RawNote] {
+                              thresholds: Thresholds) -> [RawNote] {
         let nFrames = frames.count
         guard nFrames > 0, frames[0].count == 88, onset.count == nFrames else { return [] }
 
@@ -83,7 +122,7 @@ public enum BasicPitchDecoder {
                 i += 1
             }
             i -= k // back to the last frame above threshold
-            if i - t0 <= minNoteLen { continue } // too short
+            if i - t0 <= thresholds.minNoteLenFrames { continue } // too short
             for t in t0..<i {
                 remaining[t][f] = 0
                 if f < maxFreqIdx { remaining[t][f + 1] = 0 }
@@ -129,7 +168,7 @@ public enum BasicPitchDecoder {
                 i -= 1
             }
             let iStart = i + 1 + k
-            if iEnd - iStart <= minNoteLen { continue }
+            if iEnd - iStart <= thresholds.minNoteLenFrames { continue }
             var amp: Float = 0
             for t in iStart..<iEnd { amp += frames[t][f] }
             events.append((iStart, iEnd, f + midiOffset, amp / Float(iEnd - iStart)))

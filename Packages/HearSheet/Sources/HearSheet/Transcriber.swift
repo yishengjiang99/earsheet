@@ -79,7 +79,8 @@ public enum Transcriber {
             contourFrames.removeLast(contourFrames.count - keep)
         }
 
-        let raw = BasicPitchDecoder.decode(frames: noteFrames, onset: onsetFrames, contour: contourFrames)
+        let raw = BasicPitchDecoder.decode(frames: noteFrames, onset: onsetFrames, contour: contourFrames,
+                                           thresholds: model.thresholds)
         return raw.map { r in
             NoteEvent(
                 onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),
