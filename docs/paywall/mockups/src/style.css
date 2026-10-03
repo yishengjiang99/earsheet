@@ -1,0 +1,47 @@
+/* AI Music Radar paywall mockups. Palette mirrors Ink in Sources/App/ListeningView.swift. */
+:root{
+  --paper:#FAF8F2; --paper2:#F3EEE4; --ink:#1C1C1C; --muted:#6E6A63; --hair:#E4DDD0;
+  --teal:#0C6B6B; --tealDark:#095252; --sand:#E9DCCB; --tint:#E6F0EE;
+  --serif:"DM Serif Display","Instrument Serif","Libre Caslon Text",Georgia,serif;
+  --sans:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:440px;height:956px;overflow:hidden;background:var(--paper)}
+body{font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;position:relative}
+.screen{position:absolute;inset:0;background:var(--paper);overflow:hidden}
+/* status bar + home indicator */
+.status{position:absolute;top:0;left:0;right:0;height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 30px 0 44px;z-index:50;font-weight:600;font-size:17px}
+.status .icons{display:flex;gap:7px;align-items:center}
+.bars{display:flex;gap:2px;align-items:flex-end;height:12px}.bars i{display:block;width:3px;background:var(--ink);border-radius:1px}
+.batt{width:27px;height:13px;border-radius:4px;background:var(--ink);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.home{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:140px;height:5px;border-radius:3px;background:var(--ink);z-index:60}
+.status.light{color:#fff}.status.light .bars i{background:#fff}.status.light .batt{background:#fff;color:#000}
+/* typography */
+.serif{font-family:var(--serif);font-weight:400;letter-spacing:-.2px}
+.eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:500}
+.muted{color:var(--muted)}
+.small{font-size:12px;line-height:1.4}
+/* buttons */
+.btn{display:flex;align-items:center;justify-content:center;height:56px;border-radius:28px;background:var(--teal);color:#fff;font-size:17px;font-weight:600;width:100%}
+.btn.ghost{background:transparent;color:var(--teal);height:44px}
+.btn.outline{background:transparent;border:1.5px solid var(--teal);color:var(--teal)}
+.close{position:absolute;width:32px;height:32px;border-radius:16px;background:rgba(28,28,28,.08);display:flex;align-items:center;justify-content:center;z-index:40}
+.close svg{width:12px;height:12px}
+.links{display:flex;justify-content:center;gap:18px;font-size:13px;color:var(--muted);font-weight:500}
+.links span{text-decoration:underline;text-underline-offset:2px}
+/* sheet detail (background screens) */
+.nav{position:absolute;top:58px;left:16px;font-size:17px;color:var(--teal);display:flex;align-items:center;gap:4px}
+.title{position:absolute;top:100px;left:0;right:0;text-align:center;font-size:34px}
+.caption{position:absolute;top:150px;left:0;right:0;text-align:center;font-size:14px;color:var(--muted)}
+.seg{position:absolute;top:184px;left:20px;right:20px;height:40px;border-radius:10px;background:#EDE8DF;display:flex;padding:3px}
+.seg div{flex:1;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);border-radius:8px}
+.seg .on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.toolbar{position:absolute;bottom:40px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:40px}
+.play{width:64px;height:64px;border-radius:32px;background:var(--teal);display:flex;align-items:center;justify-content:center}
+.dim{position:absolute;inset:0;background:rgba(20,22,22,.45);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--paper);border-radius:28px 28px 0 0;z-index:30;box-shadow:0 -8px 30px rgba(0,0,0,.15)}
+.grab{width:40px;height:5px;border-radius:3px;background:#D5CEC2;margin:8px auto 0}
+.card{background:#fff;border-radius:18px;border:1px solid var(--hair)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.6px;padding:4px 9px;border-radius:999px;background:var(--tint);color:var(--tealDark);text-transform:uppercase}
+.pill.dark{background:var(--teal);color:#fff}
+.lock{width:11px;height:11px}
