@@ -100,7 +100,7 @@ final class ListeningSession: ObservableObject {
         }
     }
 
-    func stop() {
+    func stop(dueToLimit: Bool = false) {
         guard case .listening = phase else { return }
         stopTimer()
         recorder.onSamples = nil
@@ -113,6 +113,9 @@ final class ListeningSession: ObservableObject {
         guard Transcriber.peakLevel(of: samples) >= 0.02 else {
             phase = .failed("Too quiet to transcribe. Try again, closer to the music.")
             return
+        }
+        if dueToLimit {
+            notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
         }
         phase = .writing
         let streamer = self.streamer
@@ -150,7 +153,7 @@ final class ListeningSession: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
-                if self.elapsed >= Transcriber.maxDurationSeconds { self.stop() }
+                if self.elapsed >= Transcriber.maxDurationSeconds { self.stop(dueToLimit: true) }
             }
         }
     }
@@ -225,8 +228,9 @@ struct ListeningView: View {
 
             HStack(spacing: 8) {
                 Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text(formattedElapsed(session.elapsed))
+                Text("\(formattedElapsed(session.elapsed)) / \(formattedElapsed(Transcriber.maxDurationSeconds))")
                     .font(.system(.body, design: .monospaced))
+                    .accessibilityLabel("Recording time \(formattedElapsed(session.elapsed)) of \(formattedElapsed(Transcriber.maxDurationSeconds)) limit")
             }
             .padding(.top, 4)
 
