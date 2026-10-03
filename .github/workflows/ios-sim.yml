@@ -78,6 +78,7 @@ jobs:
             -scheme EarSheet \
             -only-testing:EarSheetTests/SmokeTests \
             -only-testing:EarSheetTests/ImportTranscriptionTests \
+            -only-testing:EarSheetTests/StreamingExportTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \

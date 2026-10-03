@@ -117,10 +117,11 @@ final class ListeningSession: ObservableObject {
         phase = .writing
         let streamer = self.streamer
         pumpQueue.async { [weak self] in
-            // Drain any remaining windows, then finalize with the batch trim.
+            // Drain remaining audio including the final partial window,
+            // then finalize with the batch trim.
             let notes: [NoteEvent]
             do {
-                if let streamer { try streamer.pump() }
+                if let streamer { try streamer.finish() }
                 notes = streamer?.finalize() ?? []
             } catch {
                 Task { @MainActor [weak self] in

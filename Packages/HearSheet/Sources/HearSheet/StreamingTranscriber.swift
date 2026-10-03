@@ -12,6 +12,7 @@ import Foundation
 ///
 /// Threading: call `append` from anywhere (lock-protected). Call `pump` on
 /// ONE dedicated serial queue — `BasicPitchModel` is not thread-safe.
+/// Call `finish()` once on that queue when audio ends, then `finalize()`.
 /// `liveNotes()` / `finalize()` only touch the frame buffers and may be
 /// called from anywhere.
 public final class StreamingTranscriber: @unchecked Sendable {
@@ -46,6 +47,7 @@ public final class StreamingTranscriber: @unchecked Sendable {
     /// Run inference for every window that is now complete.
     /// Must be called on a single serial queue.
     /// - Returns: number of new frames appended (0 when caught up).
+    /// - Note: the trailing partial window is left for `finish()`.
     @discardableResult
     public func pump() throws -> Int {
         let windowSamples = HearSheet.windowSamples
@@ -74,6 +76,43 @@ public final class StreamingTranscriber: @unchecked Sendable {
             lock.unlock()
         }
         return newFrames
+    }
+
+    /// Drain all remaining audio, then process the final partial window(s).
+    ///
+    /// Mirrors the batch path exactly: complete windows first (as in `pump()`),
+    /// then `while start < padded.count`, zero-padding the last window to
+    /// `windowSamples`. Without this, a take shorter than one window — or any
+    /// take whose tail doesn't fill a window — would lose its trailing frames
+    /// (batch `Transcriber.transcribe` always runs the ceiling-division
+    /// window count). Must be called on the single serial queue, once, before
+    /// `finalize()`.
+    public func finish() throws {
+        try pump()
+        let windowSamples = HearSheet.windowSamples
+        let hop = Transcriber.hopSamples
+        let strip = Transcriber.stripFrames
+        while true {
+            lock.lock()
+            let start = nextWindow * hop
+            guard start < padded.count else {
+                lock.unlock()
+                break
+            }
+            let avail = min(windowSamples, padded.count - start)
+            var window = [Float](repeating: 0, count: windowSamples)
+            window.replaceSubrange(0..<avail, with: padded[start..<(start + avail)])
+            nextWindow += 1
+            lock.unlock()
+
+            let post = try model.predict(waveform: window)
+
+            lock.lock()
+            noteFrames.append(contentsOf: post.note[strip..<(172 - strip)])
+            onsetFrames.append(contentsOf: post.onset[strip..<(172 - strip)])
+            contourFrames.append(contentsOf: post.contour[strip..<(172 - strip)])
+            lock.unlock()
+        }
     }
 
     /// Decode notes from the frames collected so far (no end-trim).

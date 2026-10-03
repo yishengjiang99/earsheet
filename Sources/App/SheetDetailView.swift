@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import HearSheet
+import Photos
 import SwiftUI
 import UIKit
 
@@ -150,8 +151,42 @@ struct SheetDetailView: View {
             notice = "Could not render the photo."
             return
         }
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        notice = "Saved to Photos."
+        // Binding is a value type, so it can be captured by the
+        // completion handlers below (a struct View cannot).
+        let noticeBinding = $notice
+        func report(_ text: String) {
+            DispatchQueue.main.async { noticeBinding.wrappedValue = text }
+        }
+        let save = { Self.writeToPhotos(image, report: report) }
+        switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+        case .authorized, .limited:
+            save()
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                guard status == .authorized || status == .limited else {
+                    report("Photos access was denied — enable it in Settings to save the photo.")
+                    return
+                }
+                save()
+            }
+        case .denied, .restricted:
+            notice = "Photos access was denied — enable it in Settings to save the photo."
+        @unknown default:
+            notice = "Photos access is unavailable."
+        }
+    }
+
+    /// Write the image to the photo library, reporting the real outcome.
+    private static func writeToPhotos(_ image: UIImage, report: @escaping (String) -> Void) {
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
+        }) { success, error in
+            if success {
+                report("Saved to Photos.")
+            } else {
+                report("Could not save the photo: \(error?.localizedDescription ?? "unknown error")")
+            }
+        }
     }
 
     /// Render the engraved page to a photo (same layout as on screen).
