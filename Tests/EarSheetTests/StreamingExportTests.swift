@@ -9,13 +9,19 @@ import Foundation
 ///   including the final partial window that short takes live in.
 /// - Take JSON round-trips through Codable (persistence contract).
 /// - MP3Encoder emits non-empty, frame-synced MP3 bytes.
-/// The Core ML package comes from TEST_RUNNER_OMR_MODELS_DIR (ios-sim.yml).
+/// The Core ML package comes from OMR_MODELS_DIR (ios-sim.yml sets
+/// TEST_RUNNER_OMR_MODELS_DIR; xcodebuild strips the prefix for the simulator).
 final class StreamingExportTests: XCTestCase {
     // MARK: - Model loading (mirrors ImportTranscriptionTests)
 
     private func modelsDirectory() -> URL? {
-        if let dir = ProcessInfo.processInfo.environment["TEST_RUNNER_OMR_MODELS_DIR"] {
-            return URL(fileURLWithPath: dir)
+        // xcodebuild strips TEST_RUNNER_ and forwards the rest to the simulator.
+        if let dir = ProcessInfo.processInfo.environment["OMR_MODELS_DIR"], !dir.isEmpty {
+            let url = URL(fileURLWithPath: dir)
+            if FileManager.default.fileExists(
+                atPath: url.appendingPathComponent("BasicPitchPoly.mlpackage").path) {
+                return url
+            }
         }
         return nil
     }
