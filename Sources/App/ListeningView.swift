@@ -35,15 +35,17 @@ final class ListeningSession: ObservableObject {
 
     private let library: TakeLibrary
     private let proStore: ProStore
+    private let triggers: PaywallTriggers
     private var pendingTake: Take?
     private let recorder = AudioRecorder()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
     private var timer: Timer?
 
-    init(library: TakeLibrary, proStore: ProStore) {
+    init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers) {
         self.library = library
         self.proStore = proStore
+        self.triggers = triggers
     }
 
     func start() {
@@ -149,7 +151,12 @@ final class ListeningSession: ObservableObject {
                                     isSample: false)
                     self.pendingTake = take
                     self.phase = .done(take)
-                    self.saveLimitReached = true
+                    if self.triggers.canShowAuto(.saveLimit) {
+                        self.triggers.recordAutoShown(.saveLimit)
+                        self.saveLimitReached = true
+                    } else {
+                        self.notice = "You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now."
+                    }
                 } else {
                     let take = self.library.addTake(score: score)
                     self.phase = .done(take)
@@ -192,6 +199,7 @@ final class ListeningSession: ObservableObject {
 struct ListeningView: View {
     @StateObject var session: ListeningSession
     @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -222,6 +230,11 @@ struct ListeningView: View {
         }
         .sheet(isPresented: $session.saveLimitReached) {
             PaywallView(store: proStore)
+        }
+        .onChange(of: session.saveLimitReached) { _, showing in
+            if !showing && !proStore.isPro {
+                triggers.recordDismiss()
+            }
         }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro { session.savePendingTake() }

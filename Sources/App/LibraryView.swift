@@ -9,6 +9,7 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject var library: TakeLibrary
     @ObservedObject var proStore: ProStore
+    @ObservedObject var triggers: PaywallTriggers
     @State private var showImporter = false
     @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
@@ -118,7 +119,7 @@ struct LibraryView: View {
         .fullScreenCover(isPresented: $showListening) {
             if let session = listeningSession {
                 NavigationStack {
-                    ListeningView(session: session, proStore: proStore)
+                    ListeningView(session: session, proStore: proStore, triggers: triggers)
                         .navigationDestination(for: Take.self) { take in
                             SheetDetailView(take: take, library: library, proStore: proStore)
                         }
@@ -127,6 +128,11 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showPaywall) {
             PaywallView(store: proStore)
+        }
+        .onChange(of: showPaywall) { _, showing in
+            if !showing && !proStore.isPro {
+                triggers.recordDismiss()
+            }
         }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, let pending = pendingScore {
@@ -151,7 +157,7 @@ struct LibraryView: View {
 
     private func startListening() {
         library.stopPlayback()
-        listeningSession = ListeningSession(library: library, proStore: proStore)
+        listeningSession = ListeningSession(library: library, proStore: proStore, triggers: triggers)
         showListening = true
     }
 
@@ -170,7 +176,12 @@ struct LibraryView: View {
     private func saveImportedScore(_ score: QuantizedScore, title: String? = nil) {
         if !proStore.isPro && library.userTakes.count >= ProStore.freeSaveLimit {
             pendingScore = (score, title)
-            showPaywall = true
+            if triggers.canShowAuto(.saveLimit) {
+                triggers.recordAutoShown(.saveLimit)
+                showPaywall = true
+            } else {
+                library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
+            }
         } else if let title {
             _ = library.addTake(title: title, score: score)
         } else {
