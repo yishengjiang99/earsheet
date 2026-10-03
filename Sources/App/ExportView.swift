@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import SwiftUI
+import HearSheet
 
 /// Export format picker. Free tier: MP3 + photo free, PDF first 30s,
 /// MIDI + MusicXML locked behind Pro.
