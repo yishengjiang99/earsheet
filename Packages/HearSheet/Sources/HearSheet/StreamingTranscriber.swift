@@ -57,6 +57,7 @@ public final class StreamingTranscriber: @unchecked Sendable {
         let strip = Transcriber.stripFrames
         var newFrames = 0
         while true {
+            try Task.checkCancellation()
             lock.lock()
             let start = nextWindow * hop
             guard padded.count >= start + windowSamples else {
@@ -95,6 +96,7 @@ public final class StreamingTranscriber: @unchecked Sendable {
         let hop = Transcriber.hopSamples
         let strip = Transcriber.stripFrames
         while true {
+            try Task.checkCancellation()
             lock.lock()
             let start = nextWindow * hop
             guard start < padded.count else {

@@ -72,7 +72,7 @@ enum TranscriptionModel {
     }
 
     static let profileFileName = "BasicPitchPoly.profile.json"
-    private static let box = ModelBox()
+    private static let box = ModelBox.shared
 
     /// Reads the sidecar profile from a models directory (stock if missing or unreadable).
     static func profile(in dir: URL = BundledModels.modelsDirectory()) -> Profile {

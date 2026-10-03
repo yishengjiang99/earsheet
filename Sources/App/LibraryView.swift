@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import AVFoundation
 import HearSheet
+import SF2Player
 import SwiftUI
 
 /// The library: built-in samples plus the user's takes. Each row plays
@@ -10,6 +12,7 @@ struct LibraryView: View {
     @ObservedObject private var gate = PaywallGateStore.shared
     @State private var path: [Take] = []
     @State private var showImporter = false
+    @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
     @State private var showSettings = false
@@ -20,10 +23,13 @@ struct LibraryView: View {
     @State private var softCardDismissed = false
     @State private var softCardShown = false
 
+    enum ImportSource { case file, video }
+
     struct PendingImport: Identifiable {
         let id = UUID()
         var url: URL
         var duration: Double
+        var source: ImportSource
     }
 
     var body: some View {
@@ -105,19 +111,32 @@ struct LibraryView: View {
                     .accessibilityLabel("Settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { showImporter = true }) {
+                    Menu {
+                        Button("Choose Audio or MIDI File") { showImporter = true }
+                        Button("Choose Video from Photos") { showVideoPicker = true }
+                    } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
                     .disabled(importJob != nil)
                     .accessibilityLabel("Import audio")
+                    .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                 }
             }
         }
         .sheet(isPresented: $showImporter) {
             AudioImporter { url in
                 showImporter = false
-                pickedImport(url: url)
+                pickedImport(url: url, source: .file)
             }
+        }
+        .sheet(isPresented: $showVideoPicker) {
+            VideoPicker(
+                onPick: { url in
+                    showVideoPicker = false
+                    pickedImport(url: url, source: .video)
+                },
+                onCancel: { showVideoPicker = false }
+            )
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
@@ -132,11 +151,11 @@ struct LibraryView: View {
             presenting: importLimitPrompt
         ) { pending in
             Button("Write the first \(Int(AppConfig.Free.importSeconds)) s free") {
-                runImport(url: pending.url, limitSeconds: AppConfig.Free.importSeconds, fileSeconds: pending.duration)
+                runImport(url: pending.url, source: pending.source, limitSeconds: AppConfig.Free.importSeconds, fileSeconds: pending.duration)
             }
             Button("Whole file with Pro") {
                 showPaywall(.importLimit) {
-                    runImport(url: pending.url, limitSeconds: AppConfig.Limits.importSeconds, fileSeconds: pending.duration)
+                    runImport(url: pending.url, source: pending.source, limitSeconds: AppConfig.Limits.importSeconds, fileSeconds: pending.duration)
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -237,21 +256,68 @@ struct LibraryView: View {
         showListening = true
     }
 
-    private func pickedImport(url: URL) {
-        guard let duration = AudioImport.durationSeconds(url: url) else {
-            library.postNotice("Could not read that audio file.")
+    /// MIDI files carry notes already (no transcription, no length cap); audio files and
+    /// videos go through the free 30 s / Pro full-length choice.
+    private func pickedImport(url: URL, source: ImportSource) {
+        let ext = url.pathExtension.lowercased()
+        if source == .file, ext == "mid" || ext == "midi" {
+            importMIDI(url: url)
             return
         }
-        if !store.isPro, duration > AppConfig.Free.importSeconds + 0.5 {
-            importLimitPrompt = PendingImport(url: url, duration: duration)
+        Task { @MainActor in
+            let duration: Double?
+            switch source {
+            case .file: duration = AudioImport.durationSeconds(url: url)
+            case .video:
+                let d = try? await AVURLAsset(url: url).load(.duration)
+                duration = d.map(CMTimeGetSeconds).flatMap { $0.isFinite ? $0 : nil }
+            }
+            guard let duration else {
+                library.postNotice(source == .video ? "Could not read that video's audio." : "Could not read that audio file.")
+                return
+            }
+            if !store.isPro, duration > AppConfig.Free.importSeconds + 0.5 {
+                importLimitPrompt = PendingImport(url: url, duration: duration, source: source)
+            } else {
+                runImport(url: url, source: source, limitSeconds: AppConfig.Limits.importSeconds, fileSeconds: duration)
+            }
+        }
+    }
+
+    /// MIDI carries notes already: parse and quantize, no transcription.
+    private func importMIDI(url: URL) {
+        do {
+            let song = try SMFSong(data: Data(contentsOf: url))
+            let events = song.tracks.flatMap(\.notes).map { r in
+                NoteEvent(onset: r.startSec, offset: r.startSec + r.durationSec,
+                          midi: r.note, velocity: min(127, max(1, r.velocity)))
+            }.sorted { $0.onset < $1.onset }
+            guard !events.isEmpty else {
+                library.postNotice("No notes found in that MIDI file.")
+                return
+            }
+            Telemetry.shared.track(.fileImport, ["format": "mid", "truncated": false])
+            keep(library.makeTake(title: url.deletingPathExtension().lastPathComponent, score: Quantizer.quantize(events)))
+        } catch {
+            library.postNotice("Could not read that MIDI file.")
+        }
+    }
+
+    /// Saves a new take, or opens it unsaved at the free limit (kept if the user goes Pro).
+    private func keep(_ take: Take, truncatedNotice: String? = nil) {
+        if library.canSaveMore(isPro: store.isPro) {
+            library.save(take)
+            if let truncatedNotice { library.postNotice(truncatedNotice) }
         } else {
-            runImport(url: url, limitSeconds: AppConfig.Limits.importSeconds, fileSeconds: duration)
+            unsavedTake = take
+            path.append(take)
+            library.postNotice("Free keeps \(AppConfig.Free.savedTakes) pieces, so this take isn't saved. You can view, play and share it now; Pro keeps it.")
         }
     }
 
     /// Transcribes the first `limitSeconds` of the file. Cancellable from the overlay; the
     /// cancellation reaches the detached Core ML work through `runDetached`.
-    private func runImport(url: URL, limitSeconds: Double, fileSeconds: Double) {
+    private func runImport(url: URL, source: ImportSource, limitSeconds: Double, fileSeconds: Double) {
         importJob?.cancel()
         let started = Date()
         let truncated = fileSeconds > limitSeconds + 0.5
@@ -261,8 +327,12 @@ struct LibraryView: View {
             do {
                 let maxSamples = Int(limitSeconds * AudioRecorder.targetSampleRate)
                 let samples = try await runDetached {
-                    try AudioImport.loadMono22050(url: url, maxSamples: maxSamples, truncate: true)
+                    if source == .video {
+                        return try AudioImport.loadMono22050(asset: AVURLAsset(url: url), maxSamples: maxSamples, truncate: true)
+                    }
+                    return try AudioImport.loadMono22050(url: url, maxSamples: maxSamples, truncate: true)
                 }
+                if source == .video { try? FileManager.default.removeItem(at: url) } // temp copy
                 guard !samples.isEmpty else {
                     library.postNotice("That audio file is empty.")
                     return
@@ -276,7 +346,7 @@ struct LibraryView: View {
                 let score = Quantizer.quantize(notes)
                 let seconds = Double(samples.count) / AudioRecorder.targetSampleRate
                 Telemetry.shared.track(.fileImport, ["duration_s": fileSeconds.rounded(),
-                                                     "format": url.pathExtension.lowercased().prefix(8),
+                                                     "format": source == .video ? "video" : url.pathExtension.lowercased().prefix(8),
                                                      "truncated": truncated])
                 Telemetry.shared.track(.transcriptionStop, ["source": "import", "duration_s": seconds.rounded(),
                                                             "notes": score.notes.count, "model": profile.name,
@@ -286,21 +356,14 @@ struct LibraryView: View {
                     return
                 }
                 gate.recordTranscription()
-                let take = library.makeTake(score: score)
-                if library.canSaveMore(isPro: store.isPro) {
-                    library.save(take)
-                    if truncated {
-                        library.postNotice("Wrote the first \(Self.formattedDuration(limitSeconds)) of a \(Self.formattedDuration(fileSeconds)) file.")
-                    }
-                } else {
-                    unsavedTake = take
-                    path.append(take)
-                    library.postNotice("Free keeps \(AppConfig.Free.savedTakes) pieces, so this take isn't saved. You can view, play and share it now; Pro keeps it.")
-                }
+                keep(library.makeTake(score: score),
+                     truncatedNotice: truncated ? "Wrote the first \(Self.formattedDuration(limitSeconds)) of a \(Self.formattedDuration(fileSeconds)) file." : nil)
             } catch is CancellationError {
                 Telemetry.shared.track(.transcriptionCancel, ["source": "import"])
             } catch AudioImport.ImportError.durationLimitExceeded {
                 library.postNotice("That file is too long to import.")
+            } catch AudioImport.ImportError.noAudioTrack {
+                library.postNotice("That video has no audio track.")
             } catch {
                 library.postNotice("Could not read that audio file.")
             }
