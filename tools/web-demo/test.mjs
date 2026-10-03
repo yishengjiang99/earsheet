@@ -1,6 +1,6 @@
 // Headless end-to-end test of web/: serves it under /earsheet/ (like GitHub Pages),
 // feeds generated WAVs through the file input on each backend, and checks the notes.
-// Usage: node test.mjs [--backends=auto,webgl,wasm] [--chrome=/usr/bin/google-chrome] [--shot=path.png]
+// Usage: node test.mjs [--url=https://grepawk.com/music-hear/] [--backends=auto,webgl,wasm] [--chrome=/usr/bin/google-chrome] [--shot=path.png]
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -62,7 +62,7 @@ const server = createServer(async (req, res) => {
   try { const b = await readFile(join(web, p)); res.writeHead(200, { 'content-type': MIME[extname(p)] || 'application/octet-stream' }).end(b); }
   catch { res.writeHead(404).end(); }
 }).listen(0);
-const base = `http://127.0.0.1:${server.address().port}/earsheet/`;
+const base = args.url || `http://127.0.0.1:${server.address().port}/earsheet/`;
 
 await mkdir(fixtures, { recursive: true });
 const files = {};
@@ -86,7 +86,8 @@ for (const backend of backends) {
   try {
     await page.waitForFunction(() => window.__earsheet && (window.__earsheet.ready || window.__earsheet.error), null, { timeout: 120000 });
   } catch { }
-  const init = await page.evaluate(() => ({ ready: window.__earsheet?.ready, backend: window.__earsheet?.backend, warmupMs: window.__earsheet?.warmupMs, failures: window.__earsheet?.backendFailures, error: window.__earsheet?.error, gpu: 'gpu' in navigator }));
+  const init = await page.evaluate(() => ({ ready: window.__earsheet?.ready, backend: window.__earsheet?.backend, warmupMs: window.__earsheet?.warmupMs, failures: window.__earsheet?.backendFailures, error: window.__earsheet?.error, gpu: 'gpu' in navigator, isolated: self.crossOriginIsolated, threads: window.__earsheet?.backend === 'wasm' ? undefined : null }));
+  console.log(`page ${backend}: backend=${init.backend} crossOriginIsolated=${init.isolated} warmup=${Math.round(init.warmupMs)}ms`);
   if (!init.ready) { console.log(`backend ${backend}: NOT READY`, init, logs.slice(-10)); report.push({ requested: backend, init }); failed++; await page.close(); continue; }
   for (const [name, c] of Object.entries(CASES)) {
     await page.evaluate(() => { window.__earsheet.lastResult = null; });
