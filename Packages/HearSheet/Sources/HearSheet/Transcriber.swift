@@ -81,12 +81,27 @@ public enum Transcriber {
 
         let raw = BasicPitchDecoder.decode(frames: noteFrames, onset: onsetFrames, contour: contourFrames,
                                            thresholds: model.thresholds)
+        // Velocity from calibrated RMS energy (not model confidence).
+        // Falls back to 127*amplitude when the note's audio span is silent.
+        let calibrator = VelocityCalibrator()
+        let sampleRate = Float(HearSheet.sampleRate)
         return raw.map { r in
-            NoteEvent(
-                onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),
-                offset: BasicPitchDecoder.frameToTime(frame: r.endFrame),
+            let onsetSec = BasicPitchDecoder.frameToTime(frame: r.startFrame)
+            let offsetSec = BasicPitchDecoder.frameToTime(frame: r.endFrame)
+            let fromSample = Int((onsetSec * Double(sampleRate)).rounded())
+            let toSample = Int((offsetSec * Double(sampleRate)).rounded())
+            let rms = VelocityCalibrator.rms(of: samples, from: fromSample, to: toSample)
+            let velocity: Int
+            if rms > 0 {
+                velocity = calibrator.velocity(for: r.midi, rms: rms)
+            } else {
+                velocity = min(127, max(1, Int((127 * r.amplitude).rounded())))
+            }
+            return NoteEvent(
+                onset: onsetSec,
+                offset: offsetSec,
                 midi: r.midi,
-                velocity: min(127, max(1, Int((127 * r.amplitude).rounded()))))
+                velocity: velocity)
         }.sorted { $0.onset < $1.onset }
     }
 

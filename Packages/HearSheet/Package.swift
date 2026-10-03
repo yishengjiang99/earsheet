@@ -12,7 +12,7 @@ let package = Package(
         .package(path: "../SF2Player"),
     ],
     targets: [
-        .target(name: "HearSheet"),
+        .target(name: "HearSheet", resources: [.process("velocity-calibration.json")]),
         .testTarget(
             name: "HearSheetTests",
             dependencies: [
