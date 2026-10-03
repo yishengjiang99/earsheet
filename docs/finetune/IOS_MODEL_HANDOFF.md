@@ -1,5 +1,16 @@
 # iOS handoff: embedding the (fine-tuned) Basic Pitch model
 
+> **Shipping config (2026-10-03): stock ICASSP 2022 weights + tuned decoder thresholds.**
+> The weights are the stock model the app already bundles through `models.lock`
+> (Spotify's `nmp.mlpackage`), so nothing needs to be downloaded or re-pinned.
+> The thresholds are the defaults in `BasicPitchDecoder` on main:
+> **onset 0.7, frame 0.4, `minNoteLen` 5 frames (58 ms)**. Spotify's defaults were 0.5 / 0.3 / 11.
+> The same values are in the `decoder-thresholds.json` asset of release
+> [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest).
+> Held-out onset F1 vs Spotify defaults: GuitarSet 0.843 vs 0.802, MAESTRO 0.735 vs 0.695,
+> SMD 0.762 vs 0.703. No fine-tune beat this on real audio (EXPERIMENTS.md). The rest of
+> this doc covers swapping in a different checkpoint later.
+
 This doc covers getting a model built by `scripts/finetune-basic-pitch` (or the stock
 model) into the EarSheet iOS app. Weights are **never committed**. They are published as
 GitHub release assets and pinned by SHA-256 in `models.lock`.
@@ -108,18 +119,22 @@ The decoder is `BasicPitchDecoder.decode(frames:onset:contour:thresholds:)` (a p
 `note_creation.model_output_to_notes`: infer_onsets, melodia trick, min note length 11
 frames, energy tolerance 11).
 
-**Thresholds:** each release's notes give recommended values, tuned on the mixed
-validation set (synthetic + GuitarSet + MAESTRO val):
+**Thresholds (shipping):** onset **0.7**, frame **0.4**, min note **5 frames**. These are the
+defaults in `BasicPitchDecoder.Thresholds()` and `BasicPitchDecoder.minNoteLen` on main.
+They were tuned for the stock weights by grid search (onset 0.3-0.8 x frame 0.2-0.5 x
+min note {5, 7, 11}) on the mixed validation set, then checked on the held-out tests:
 
-| model | onset | frame | source |
-|---|---|---|---|
-| stock (`model-ft-exp0`) | **0.7** (Spotify default 0.5) | 0.3 | EXPERIMENTS.md E0t: better F1 on every held-out set (GuitarSet 0.802 to 0.822, MAESTRO 0.695 to 0.701, synthetic +0.02 to +0.07) |
-| later `model-ft-expN` | see release notes / `metrics.json` `thresholds.tuned` | | |
+| set | tuned 0.7 / 0.4 / 5 | Spotify 0.5 / 0.3 / 11 |
+|---|---|---|
+| GuitarSet player 05 (real) | 0.843 | 0.802 |
+| MAESTRO test (real) | 0.735 | 0.695 |
+| SMD test (real) | 0.762 | 0.703 |
+| synthetic GUGS / FluidR3 | 0.887 / 0.921 | 0.861 / 0.901 |
 
-Use them through `BasicPitchDecoder.Thresholds(onset:frame:)`. Today the app always
-uses the defaults (`Thresholds()` = 0.5 / 0.3). Shipping a model with different
-thresholds means passing them from the call site in `Transcriber` (one constant per
-model).
+A different checkpoint needs its own tuned values (they ship in each release's notes /
+`metrics.json`). Pass them with `BasicPitchDecoder.Thresholds(onset:frame:)` from the
+`Transcriber` call site. `minNoteLen` is a static constant today, so change it there.
+The web demo uses the same values (min note 58 ms = 5 frames).
 
 ## 7. Where it plugs in
 
