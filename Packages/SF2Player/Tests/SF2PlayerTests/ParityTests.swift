@@ -19,7 +19,8 @@ final class ParityTests: XCTestCase {
 
     func testCScaleMatchesGbk() throws { try runParity("c_scale.mid", reference: "c_scale.gbk.json") }
 
-    func testSwedenMatchesGbk() throws { try runParity("sweden.midi", reference: "sweden.gbk.json") }
+    /// Public-domain 2-track sample (fixtures/samples/ode-to-joy.mid, the app's "Play a sample").
+    func testOdeToJoyMatchesGbk() throws { try runParity("../samples/ode-to-joy.mid", reference: "ode-to-joy.gbk.json") }
 
     private func runParity(_ midiName: String, reference refName: String) throws {
         let sf = try SharedSoundFont.get()

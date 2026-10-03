@@ -1,0 +1,13 @@
+{
+  "pins" : [
+    {
+      "identity" : "sf2player-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/yishengjiang99/sf2player-swift.git",
+      "state" : {
+        "revision" : "53b45034270f50936dc83565e62e89e568abffb3"
+      }
+    }
+  ],
+  "version" : 2
+}

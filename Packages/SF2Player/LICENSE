@@ -1,4 +1,5 @@
-SF2Player — SoundFont 2 synth, SMF reader and AVAudioEngine player for AI Camera - Music Reader
+SF2Player — SMF reader, sequencer and AVAudioEngine player for AI Camera - Music Reader
+(the SoundFont 2 synth is the shared SF2Engine package, github.com/yishengjiang99/sf2player-swift, same license)
 Copyright (C) 2026 Yisheng Jiang
 
 SPDX-License-Identifier: AGPL-3.0-or-later

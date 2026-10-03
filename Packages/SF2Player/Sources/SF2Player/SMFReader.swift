@@ -54,6 +54,9 @@ public struct SMFControlEvent: Equatable, Sendable {
     public var sec: Double
     public var channel: Int
     public var kind: Kind
+    /// Order among the track's events at the same tick: a CC's gbk seq; a pitch bend sorts right
+    /// after the event that preceded it in the file.
+    public var seq: Int = 0
 }
 
 public struct SMFTrack: Equatable, Sendable {
@@ -103,7 +106,7 @@ enum SMFReader {
     enum RawKind {
         case tempo(Int), timeSig(Int, Int), noteOn(Int, Int), noteOff(Int), cc(Int, Int), program(Int), pitchBend(Int)
     }
-    struct RawEvent { var seq: Int; var tick: Int; var channel: Int; var kind: RawKind }
+    struct RawEvent { var seq: Int; var tick: Int; var channel: Int; var kind: RawKind; var order = 0 }
     struct RawTrack { var name = ""; var instrument = ""; var events: [RawEvent] = [] }
 
     static func text(_ b: ArraySlice<UInt8>) -> String {
@@ -170,7 +173,9 @@ enum SMFReader {
             else if cmd == 0xc0 { kind = .program(d1 & 0x7f) }
             else if cmd == 0xe0 {
                 // Not in gbk's event list (and not counted in its seq); kept as data only.
-                out.events.append(RawEvent(seq: -1, tick: tick, channel: ch, kind: .pitchBend(((d2 & 0x7f) << 7 | (d1 & 0x7f)) - 8192)))
+                // `order` = seq of the event before it, so a spec render can place it in file order.
+                out.events.append(RawEvent(seq: -1, tick: tick, channel: ch, kind: .pitchBend(((d2 & 0x7f) << 7 | (d1 & 0x7f)) - 8192),
+                                           order: seq - 1))
             }
             if let kind { out.events.append(RawEvent(seq: seq, tick: tick, channel: ch, kind: kind)); seq += 1 }
         }
@@ -258,7 +263,7 @@ enum SMFReader {
                 case let .cc(c, v):
                     if c == 0 { bankMsb[e.channel] = v }
                     if c == 32 { bankLsb[e.channel] = v }
-                    controls.append(SMFControlEvent(tick: e.tick, sec: sec, channel: e.channel, kind: .cc(controller: c, value: v)))
+                    controls.append(SMFControlEvent(tick: e.tick, sec: sec, channel: e.channel, kind: .cc(controller: c, value: v), seq: e.seq))
                 case let .program(p):
                     let bank = ((bankMsb[e.channel] & 0x7f) << 7) | (bankLsb[e.channel] & 0x7f)
                     play.append(SMFPlayEvent(sec: sec, tick: e.tick, channel: e.channel, seq: e.seq, kind: .program(program: p, bank: bank)))
@@ -277,7 +282,8 @@ enum SMFReader {
             }
             for e in track.events {
                 if case let .pitchBend(v) = e.kind {
-                    controls.append(SMFControlEvent(tick: e.tick, sec: tickToSec(tempoMap, div, Double(e.tick)), channel: e.channel, kind: .pitchBend(value: v)))
+                    controls.append(SMFControlEvent(tick: e.tick, sec: tickToSec(tempoMap, div, Double(e.tick)), channel: e.channel,
+                                                    kind: .pitchBend(value: v), seq: e.order))
                 }
             }
             controls = stableSorted(controls) { $0.tick < $1.tick }

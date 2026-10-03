@@ -43,9 +43,9 @@ final class RealtimeCoreTests: XCTestCase {
         XCTAssertFalse(core.isPlaying)
     }
 
-    func testRealtimeSwedenMatchesOfflineFirstSeconds() throws {
+    func testRealtimeOdeToJoyMatchesOfflineFirstSeconds() throws {
         let sf = try SharedSoundFont.get()
-        let midi = try Data(contentsOf: TestPaths.fixtures.appendingPathComponent("sweden.midi"))
+        let midi = try Data(contentsOf: TestPaths.fixtures.appendingPathComponent("../samples/ode-to-joy.mid"))
         var plan = try SF2SequenceBuilder.plan(song: SMFSong(data: midi), soundFont: sf, sampleRate: 44100)
         plan.lengthFrames = 44100 * 4
         let offline = SF2OfflineRenderer.render(plan)

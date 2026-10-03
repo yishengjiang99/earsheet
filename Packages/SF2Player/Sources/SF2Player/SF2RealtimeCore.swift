@@ -14,17 +14,22 @@ public final class SF2CompiledSequence: @unchecked Sendable {
     public let lengthFrames: Int
     public let maxVoices: Int
     public let song: SMFSong?
+    public let fidelity: SF2Fidelity
     let store: SF2RegionStore
     let events: UnsafeMutablePointer<EngineEvent>
     let eventCount: Int
     let tracks: UnsafeMutablePointer<(Int, TrackRT)>
     let trackCount: Int
+    /// Per event: for a noteOn, the frame of its matching noteOff (same track, channel and note,
+    /// first unmatched in order) or `lengthFrames`; -1 for other events. Lets a seek re-sound held notes.
+    let noteEnds: UnsafeMutablePointer<Int>
 
     public init(plan: SF2RenderPlan) {
         sampleRate = plan.sampleRate
         lengthFrames = plan.lengthFrames
         maxVoices = plan.maxVoices
         song = plan.song
+        fidelity = plan.fidelity
         let store = SF2RegionStore()
         self.store = store
         let sorted = SF2SequenceBuilder.sortedEvents(plan.events)
@@ -38,6 +43,20 @@ public final class SF2CompiledSequence: @unchecked Sendable {
                 note: Int32(truncatingIfNeeded: e.note), velocity: Int32(truncatingIfNeeded: e.velocity),
                 list: e.regions.map { store.add($0) } ?? -1,
                 cc7: e.cc7Volume ?? .nan, cc10: e.cc10Pan ?? .nan, cc11: e.cc11Expression ?? .nan, pan: e.pan ?? .nan, gain: e.gain ?? .nan))
+        }
+        noteEnds = .allocate(capacity: max(1, sorted.count))
+        noteEnds.initialize(repeating: -1, count: max(1, sorted.count))
+        var open: [Int64: [Int]] = [:]
+        for i in 0 ..< eventCount {
+            let e = events[i]
+            let key = (Int64(e.trackIndex) & 0xFFFF) << 32 | (Int64(e.channel) & 0xFFFF) << 16 | (Int64(e.note) & 0xFFFF)
+            if e.kind == SF2SynthEvent.Kind.noteOn.rawValue {
+                noteEnds[i] = plan.lengthFrames
+                open[key, default: []].append(i)
+            } else if e.kind == SF2SynthEvent.Kind.noteOff.rawValue, var q = open[key], !q.isEmpty {
+                noteEnds[q.removeFirst()] = e.frame
+                open[key] = q
+            }
         }
         trackCount = plan.tracks.count
         tracks = .allocate(capacity: max(1, plan.tracks.count))
@@ -54,13 +73,15 @@ public final class SF2CompiledSequence: @unchecked Sendable {
     deinit {
         events.deinitialize(count: eventCount); events.deallocate()
         tracks.deinitialize(count: trackCount); tracks.deallocate()
+        noteEnds.deinitialize(count: max(1, eventCount)); noteEnds.deallocate()
     }
 
     public var durationSeconds: Double { song?.durationSec ?? Double(lengthFrames) / sampleRate }
 
     var view: SequenceView {
         SequenceView(events: UnsafePointer(events), eventCount: eventCount, tracks: UnsafePointer(tracks), trackCount: trackCount,
-                     store: store.hdr, maxVoices: maxVoices, lengthFrames: lengthFrames)
+                     store: store.hdr, maxVoices: maxVoices, lengthFrames: lengthFrames, noteEnds: UnsafePointer(noteEnds),
+                     spec: fidelity == .spec)
     }
 }
 
@@ -72,12 +93,15 @@ struct SequenceView {
     var store: UnsafeMutablePointer<SF2RegionStore.Header>
     var maxVoices: Int
     var lengthFrames: Int
+    var noteEnds: UnsafePointer<Int>
+    var spec: Bool
 }
 
 struct RTCommand {
-    enum Op: Int32 { case setSequence, play, pause, stop, seek, tempo }
+    enum Op: Int32 { case setSequence, play, pause, stop, seek, tempo, mute, loop }
     var op: Op
     var value: Double = 0
+    var value2: Double = 0
     var view: SequenceView?
     var token: UnsafeMutableRawPointer?
 }
@@ -158,6 +182,11 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         var songPos = 0.0      // song-time frames (sample rate of the sequence)
         var tempoScale = 1.0
         var eventIndex = 0
+        /// Bit i set: noteOns of SMF track i are skipped (tracks >= 64 are never muted).
+        var muteMask: UInt64 = 0
+        /// A–B loop in song frames; active when loopEnd > loopStart.
+        var loopStart = 0.0
+        var loopEnd = 0.0
     }
 
     public let sampleRate: Double
@@ -203,6 +232,21 @@ public final class SF2RealtimeCore: @unchecked Sendable {
     @discardableResult public func stop() -> Bool { commands.push(RTCommand(op: .stop)) }
     @discardableResult public func seek(toSeconds s: Double) -> Bool { commands.push(RTCommand(op: .seek, value: max(0, s) * sampleRate)) }
     @discardableResult public func setTempoScale(_ x: Double) -> Bool { commands.push(RTCommand(op: .tempo, value: x)) }
+    /// Mutes SMF tracks by index (bit i = track i, i < 64): their sounding notes are released and
+    /// later noteOns skipped; unmuting re-sounds notes held at the current position.
+    @discardableResult public func setMutedTracks(_ tracks: Set<Int>) -> Bool {
+        commands.push(RTCommand(op: .mute, value: Double(bitPattern: Self.muteMask(tracks))))
+    }
+    /// Loops song time [start, end) seconds (end <= start clears). Reaching `end` releases the
+    /// sounding notes and continues at `start`, re-sounding notes held there.
+    @discardableResult public func setLoop(startSeconds: Double, endSeconds: Double) -> Bool {
+        commands.push(RTCommand(op: .loop, value: max(0, startSeconds) * sampleRate, value2: max(0, endSeconds) * sampleRate))
+    }
+    @discardableResult public func clearLoop() -> Bool { commands.push(RTCommand(op: .loop, value: 0, value2: 0)) }
+
+    static func muteMask(_ tracks: Set<Int>) -> UInt64 {
+        tracks.reduce(UInt64(0)) { m, t in (0 ..< 64).contains(t) ? m | (UInt64(1) << UInt64(t)) : m }
+    }
 
     public var positionSeconds: Double { Double(bitPattern: sf2_atomic_load_u64(publishedPos)) / sampleRate }
     public var isPlaying: Bool { sf2_atomic_load_i64(publishedFlags) & 1 != 0 }
@@ -224,10 +268,33 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         _ = retired.push(token)
     }
 
-    private func seekRT(_ target: Double) {
+    @inline(__always) private func isMuted(_ trackIndex: Int32, _ mask: UInt64) -> Bool {
+        trackIndex >= 0 && trackIndex < 64 && mask & (UInt64(1) << UInt64(trackIndex)) != 0
+    }
+
+    /// Re-sounds notes that started before event `upTo` and are still held at `pos` (their noteOff
+    /// is later), for tracks in `onlyMask` (all when ~0) that are not muted.
+    private func retriggerHeld(upTo: Int, at pos: Double, onlyMask: UInt64 = ~0) {
         let r = rt
         guard let seq = r.pointee.seq else { return }
-        engine.clearVoices()
+        let mute = r.pointee.muteMask
+        var i = 0
+        while i < upTo && i < seq.eventCount {
+            let e = seq.events[i]
+            if e.kind == SF2SynthEvent.Kind.noteOn.rawValue && Double(seq.noteEnds[i]) > pos && !isMuted(e.trackIndex, mute) {
+                let t = e.trackIndex
+                let selected = onlyMask == ~0 || (t >= 0 && t < 64 && onlyMask & (UInt64(1) << UInt64(t)) != 0)
+                if selected { engine.dispatch(e) }
+            }
+            i += 1
+        }
+    }
+
+    /// `soft`: release sounding voices (loop wrap) instead of cutting them.
+    private func seekRT(_ target: Double, soft: Bool = false, retrigger: Bool = true) {
+        let r = rt
+        guard let seq = r.pointee.seq else { return }
+        if soft { engine.releaseAllRT() } else { engine.clearVoices() }
         engine.resetTracksRT()
         for i in 0 ..< seq.trackCount { engine.setTrackRT(seq.tracks[i].0, seq.tracks[i].1) }
         r.pointee.songPos = max(0, target)
@@ -236,12 +303,15 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         // Replay program/controller state before the target; skip notes.
         while idx < seq.eventCount && Double(seq.events[idx].frame) < r.pointee.songPos {
             let k = seq.events[idx].kind
-            if k == SF2SynthEvent.Kind.setPreset.rawValue || k == SF2SynthEvent.Kind.setControllers.rawValue {
+            if k == SF2SynthEvent.Kind.setPreset.rawValue || k == SF2SynthEvent.Kind.setControllers.rawValue
+                || k == SF2SynthEvent.Kind.controlChange.rawValue || k == SF2SynthEvent.Kind.pitchBend.rawValue {
                 engine.dispatch(seq.events[idx])
             }
             idx += 1
         }
         r.pointee.eventIndex = idx
+        // Only while playing: a paused seek re-sounds on the next play.
+        if retrigger && idx > 0 && r.pointee.playing { retriggerHeld(upTo: idx, at: r.pointee.songPos) }
     }
 
     private func handleCommands() {
@@ -254,15 +324,19 @@ public final class SF2RealtimeCore: @unchecked Sendable {
                 r.pointee.token = c.token
                 r.pointee.seq = c.view
                 if let v = c.view {
-                    engine.st.pointee.store = v.store
-                    engine.st.pointee.globalList = -1
+                    engine.setStoreRT(v.store)
+                    engine.fidelity = v.spec ? .spec : .gbk
                     engine.setMaxVoicesRT(v.maxVoices)
                 }
                 r.pointee.playing = false
                 seekRT(0)
             case .play:
                 if r.pointee.seq != nil {
-                    if r.pointee.finished { seekRT(0) }
+                    if r.pointee.finished { seekRT(r.pointee.loopEnd > r.pointee.loopStart ? r.pointee.loopStart : 0) }
+                    if !r.pointee.playing {
+                        // Paused / seeked while stopped: re-sound what is held at this position.
+                        retriggerHeld(upTo: r.pointee.eventIndex, at: r.pointee.songPos)
+                    }
                     r.pointee.playing = true
                 }
             case .pause:
@@ -275,6 +349,20 @@ public final class SF2RealtimeCore: @unchecked Sendable {
                 seekRT(c.value)
             case .tempo:
                 r.pointee.tempoScale = max(0.05, min(8, c.value.isFinite ? c.value : 1))
+            case .mute:
+                let old = r.pointee.muteMask
+                let new = c.value.bitPattern
+                r.pointee.muteMask = new
+                if new & ~old != 0 { engine.releaseTracksRT(new & ~old) }
+                if old & ~new != 0 && r.pointee.playing { retriggerHeld(upTo: r.pointee.eventIndex, at: r.pointee.songPos, onlyMask: old & ~new) }
+            case .loop:
+                let a = c.value.isFinite ? c.value : 0, b = c.value2.isFinite ? c.value2 : 0
+                if b > a {
+                    r.pointee.loopStart = a
+                    r.pointee.loopEnd = min(b, Double(r.pointee.seq?.lengthFrames ?? Int(b)))
+                } else {
+                    r.pointee.loopStart = 0; r.pointee.loopEnd = 0
+                }
             }
         }
     }
@@ -293,14 +381,26 @@ public final class SF2RealtimeCore: @unchecked Sendable {
         } else {
             let scale = r.pointee.tempoScale
             var i = 0
+            let mute = r.pointee.muteMask
             while i < count {
+                let looping = r.pointee.loopEnd > r.pointee.loopStart
+                if looping && r.pointee.songPos >= r.pointee.loopEnd {
+                    seekRT(r.pointee.loopStart, soft: true)
+                }
                 while r.pointee.eventIndex < seq.eventCount && Double(seq.events[r.pointee.eventIndex].frame) <= r.pointee.songPos {
-                    engine.dispatch(seq.events[r.pointee.eventIndex])
+                    let e = seq.events[r.pointee.eventIndex]
+                    if !(mute != 0 && e.kind == SF2SynthEvent.Kind.noteOn.rawValue && isMuted(e.trackIndex, mute)) {
+                        engine.dispatch(e)
+                    }
                     r.pointee.eventIndex += 1
                 }
                 var k = count - i
                 if r.pointee.eventIndex < seq.eventCount {
                     let need = ((Double(seq.events[r.pointee.eventIndex].frame) - r.pointee.songPos) / scale).rounded(.up)
+                    k = min(k, max(1, Int(need)))
+                }
+                if looping {
+                    let need = ((r.pointee.loopEnd - r.pointee.songPos) / scale).rounded(.up)
                     k = min(k, max(1, Int(need)))
                 }
                 engine.renderRange(outL + i, outR + i, k)

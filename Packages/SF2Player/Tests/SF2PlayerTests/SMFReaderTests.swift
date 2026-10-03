@@ -21,17 +21,20 @@ final class SMFReaderTests: XCTestCase {
         XCTAssertEqual(song.tracks[1].playEvents.first?.kind, .program(program: 0, bank: 0))
     }
 
-    func testSwedenFixtureMatchesGbkParse() throws {
-        let song = try SMFSong(data: Data(contentsOf: TestPaths.fixtures.appendingPathComponent("sweden.midi")))
-        // gbk parseMidiBuffer: format 1, 480 tpq, 83.478272 s, 46 bpm, 4/4, 2 tracks, 195 notes on track 1
+    func testOdeToJoySampleParses() throws {
+        let song = try SMFSong(data: Data(contentsOf: TestPaths.fixtures.appendingPathComponent("../samples/ode-to-joy.mid")))
+        // scripts/samples/make-ode-to-joy-midi.py: format 1, 480 tpq, 16 bars of 4/4 at 100 bpm = 38.4 s,
+        // conductor + right hand (59 notes) + left hand (22 notes)
         XCTAssertEqual(song.format, 1)
         XCTAssertEqual(song.division, 480)
-        XCTAssertEqual(song.durationSec, 83.478272, accuracy: 1e-9)
-        XCTAssertEqual(song.bpm, 46)
+        XCTAssertEqual(song.durationSec, 38.4, accuracy: 1e-9)
+        XCTAssertEqual(song.bpm, 100)
         XCTAssertEqual(song.timeSig, "4/4")
-        XCTAssertEqual(song.tracks.count, 2)
-        XCTAssertEqual(song.tracks[1].notes.count, 195)
-        XCTAssertEqual(song.tracks[0].name, "Sweden - photo transcription")
+        XCTAssertEqual(song.tracks.count, 3)
+        XCTAssertEqual(song.tracks[1].notes.count, 59)
+        XCTAssertEqual(song.tracks[2].notes.count, 22)
+        XCTAssertEqual(song.tracks[0].name, "Ode to Joy (L. v. Beethoven)")
+        XCTAssertEqual(song.tracks[1].name, "Right hand")
     }
 
     /// Hand-built SMF: format 0, running status, note-on vel 0 as note-off, tempo change,

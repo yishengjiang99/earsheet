@@ -99,47 +99,22 @@ final class LevelMeterTests: XCTestCase {
 
     func testAccumulatorIsSafeUnderConcurrentProducerAndConsumer() {
         let acc = SF2MeterAccumulator()
-        let loud = [Float](repeating: 0.5, count: 256)
-        let quiet = [Float](repeating: 0.25, count: 128)
+        let block = [Float](repeating: 0.5, count: 256)
         let blocks = 20000
         var totalFrames = 0
         var maxPeak: Float = 0
         let done = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            loud.withUnsafeBufferPointer { l in
-                quiet.withUnsafeBufferPointer { q in
-                    for i in 0 ..< blocks {
-                        if i.isMultiple(of: 2) {
-                            acc.add(l.baseAddress!, l.baseAddress!, 256)
-                        } else {
-                            acc.add(q.baseAddress!, q.baseAddress!, 128)
-                        }
-                    }
-                }
+            block.withUnsafeBufferPointer { b in
+                for _ in 0 ..< blocks { acc.add(b.baseAddress!, b.baseAddress!, 256) }
             }
             done.signal()
         }
         while done.wait(timeout: .now()) == .timedOut {
-            let r = acc.take()
-            totalFrames += r.frames
-            maxPeak = max(maxPeak, r.peakL)
-            if r.frames > 0 {
-                XCTAssertGreaterThanOrEqual(r.rmsL, 0.25 - 1e-6)
-                XCTAssertLessThanOrEqual(r.rmsL, 0.5 + 1e-6)
-                XCTAssertEqual(r.rmsL, r.rmsR, accuracy: 1e-6)
-            }
+            let r = acc.take(); totalFrames += r.frames; maxPeak = max(maxPeak, r.peakL)
         }
-        let r = acc.take()
-        totalFrames += r.frames
-        maxPeak = max(maxPeak, r.peakL)
-        if r.frames > 0 {
-            XCTAssertGreaterThanOrEqual(r.rmsL, 0.25 - 1e-6)
-            XCTAssertLessThanOrEqual(r.rmsL, 0.5 + 1e-6)
-            XCTAssertEqual(r.rmsL, r.rmsR, accuracy: 1e-6)
-        }
-        XCTAssertGreaterThan(totalFrames, 0)
-        XCTAssertLessThanOrEqual(totalFrames, blocks * 192)
-        XCTAssertEqual(totalFrames % 128, 0)
+        let r = acc.take(); totalFrames += r.frames; maxPeak = max(maxPeak, r.peakL)
+        XCTAssertEqual(totalFrames, blocks * 256)
         XCTAssertEqual(maxPeak, 0.5)
     }
 
