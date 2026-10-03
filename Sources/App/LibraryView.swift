@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import HearSheet
+import SF2Player
+import AVFoundation
 import SwiftUI
 
 /// The library: built-in samples plus the user's takes. Each row plays
@@ -7,6 +9,7 @@ import SwiftUI
 struct LibraryView: View {
     @StateObject var library: TakeLibrary
     @State private var showImporter = false
+    @State private var showVideoPicker = false
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
 
@@ -72,18 +75,31 @@ struct LibraryView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { showImporter = true }) {
+                    Menu {
+                        Button("Choose Audio or MIDI File") { showImporter = true }
+                        Button("Choose Video from Photos") { showVideoPicker = true }
+                    } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
                     .accessibilityLabel("Import audio")
+                    .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                 }
             }
         }
         .sheet(isPresented: $showImporter) {
             AudioImporter { url in
                 showImporter = false
-                importAudio(url: url)
+                importPicked(url: url)
             }
+        }
+        .sheet(isPresented: $showVideoPicker) {
+            VideoPicker(
+                onPick: { url in
+                    showVideoPicker = false
+                    importVideo(url: url)
+                },
+                onCancel: { showVideoPicker = false }
+            )
         }
         .fullScreenCover(isPresented: $showListening) {
             if let session = listeningSession {
@@ -109,6 +125,69 @@ struct LibraryView: View {
         library.stopPlayback()
         listeningSession = ListeningSession(library: library)
         showListening = true
+    }
+
+    /// Route a picked document: MIDI files are parsed directly into notes,
+    /// everything else goes through audio transcription.
+    private func importPicked(url: URL) {
+        let ext = url.pathExtension.lowercased()
+        if ext == "mid" || ext == "midi" {
+            importMIDI(url: url)
+        } else {
+            importAudio(url: url)
+        }
+    }
+
+    /// MIDI carries notes already: parse and quantize, no transcription.
+    private func importMIDI(url: URL) {
+        Task { @MainActor in
+            do {
+                let data = try Data(contentsOf: url)
+                let song = try SMFSong(data: data)
+                let events = song.tracks.flatMap(\.notes).map { r in
+                    NoteEvent(onset: r.startSec,
+                              offset: r.startSec + r.durationSec,
+                              midi: r.note,
+                              velocity: min(127, max(1, r.velocity)))
+                }.sorted { $0.onset < $1.onset }
+                guard !events.isEmpty else {
+                    library.postNotice("No notes found in that MIDI file.")
+                    return
+                }
+                let score = Quantizer.quantize(events)
+                _ = library.addTake(title: url.deletingPathExtension().lastPathComponent,
+                                    score: score)
+            } catch {
+                library.postNotice("Could not read that MIDI file.")
+            }
+        }
+    }
+
+    /// Video from Photos: extract the audio track, then transcribe as usual.
+    private func importVideo(url: URL) {
+        Task { @MainActor in
+            do {
+                let samples = try await Task.detached(priority: .userInitiated) {
+                    try AudioImport.loadMono22050(asset: AVAsset(url: url))
+                }.value
+                try? FileManager.default.removeItem(at: url) // temp copy
+                guard !samples.isEmpty else { return }
+                let notes = try await Task.detached(priority: .userInitiated) {
+                    let box = ModelBox()
+                    let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
+                    return try Transcriber.transcribe(samples: samples, model: model)
+                }.value
+                let score = Quantizer.quantize(notes)
+                if score.notes.isEmpty {
+                    library.postNotice("No notes found in that video's audio.")
+                } else {
+                    _ = library.addTake(score: score)
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                library.postNotice("Could not read that video's audio.")
+            }
+        }
     }
 
     private func importAudio(url: URL) {
