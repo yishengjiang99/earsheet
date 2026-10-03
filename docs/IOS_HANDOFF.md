@@ -133,11 +133,20 @@ Release [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag
 
 ## 11. Open TODOs
 
-- [ ] **StoreKit 2 client** (none in `Sources/App` yet): products, purchase with appAccountToken, `Transaction.updates`, verify/restore calls, the `Entitlements` cache, the Restore button.
-- [ ] **Paywall UI and gates** per PAYWALL_FLOW (save cap 3, 30 s import/PDF cap, MIDI/MusicXML lock). Lifetime launch price ($39.99 for 30 days) isn't configured.
-- [ ] **Push (app side):** add the Push Notifications capability so `EarSheet.entitlements` has `aps-environment` = `production` (`CODE_SIGN_ENTITLEMENTS`). Then do token registration and a permission prompt at a sensible moment. Already done on Apple's side: PUSH_NOTIFICATIONS is on App ID `com.ragnus.pnge`, and the CI App Store profile is now `GLML8673YB` (has `aps-environment=production`; `ZVGVFXJTSU` was deleted). The server's APNs key `GAPGVZ7K2D` authenticates with sandbox and production.
-- [ ] **Device registration** and the **telemetry client** (queue, flush, opt-out toggle in Settings).
+Done on branch `ios/iap-server-integration` (PR "iOS: StoreKit 2 IAP, server integration, fixes"):
+
+- [x] **StoreKit 2 client** (`ProStore.swift`): products, purchase with the Keychain appAccountToken, `Transaction.updates` + `Transaction.unfinished`, `/api/iap/verify` with a persisted retry queue, `/api/iap/restore`, entitlement cache (UserDefaults), server cross-check (`/api/iap/entitlement`), Restore on the paywall and in Settings.
+- [x] **Paywall UI and gates** (`PaywallView.swift`, `PaywallGate.swift`, `ExportOptions.swift`): save cap 3 (the 4th take stays viewable but unsaved, "Keep it with Pro"), 30 s import (choose "first 30 s free" or Pro), 30 s PDF, MIDI/MusicXML lock, 3rd-transcription library card, frequency caps.
+- [x] **Push (app side)** (`PushManager.swift`): `CODE_SIGN_ENTITLEMENTS` = `Sources/EarSheet.entitlements` (Release, `aps-environment=production`) / `Sources/EarSheet-Debug.entitlements` (Debug, `development`). Permission is asked from "Turn on trial reminder" after a trial starts, or the Notifications toggle in Settings; never at launch. Token → `/api/push/register` (`sandbox` for DEBUG, `production` otherwise), toggle off → `/api/push/unregister`.
+- [x] **Device registration** (launch, version change, foreground at most every 6 h) and the **telemetry client** (`Telemetry.swift`: on-disk queue, 30 s / 50 events / background flush, Retry-After + backoff, opt-out toggle in Settings).
+- [x] `.storekit` config: `Sources/AIMusicRadar.storekit`, referenced by the EarSheet scheme's Run action.
+- [x] Bugs: import and live transcription cancel (`runDetached` forwards cancellation; `Transcriber` checks it per window); the take limit is explicit (10 min, countdown in the last minute, notice when it stops); one shared model loader (`TranscriptionModel`).
+- [x] Model swap-in: optional `models/BasicPitchPoly.profile.json` (`{"name","onsetThreshold","frameThreshold"}`) sets decoder thresholds and the `model` telemetry property.
+
+Still open:
+
+- [ ] Lifetime launch price ($39.99 for 30 days) isn't configured. The soft export interstitial (PAYWALL_FLOW screen 1) and "Replace an older take" on the save-limit flow aren't built; the share menu goes straight to the paywall.
+- [ ] Sandbox purchase test on TestFlight (environment `Sandbox` shows up in the admin panel), plus a push test from the admin panel on a TestFlight build.
 - [ ] **ASC:** submit the 3 products with the next app version (all are READY_TO_SUBMIT and have review screenshots). Marketing URL, EULA and subtitle aren't set. The en-US 6.9" and 13" screenshots are uploaded (`asc-upload-screenshots.yml`).
-- [ ] Add a StoreKit configuration file (`.storekit`) for local and simulator testing with the IDs above. Test sandbox purchases on TestFlight (environment `Sandbox` shows up in the admin panel).
-- [ ] Ship a fine-tuned model once an experiment beats exp0 (see EXPERIMENTS.md).
+- [ ] Ship a fine-tuned model once an experiment beats exp0 (see EXPERIMENTS.md), with a `BasicPitchPoly.profile.json` carrying its tuned thresholds.
 - [ ] The server doesn't call the App Store Server API (verification is offline JWS plus ASSN). Add it only if status refresh or refund lookups become necessary.
