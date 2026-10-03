@@ -1,6 +1,6 @@
 name: ASC EarSheet upload listing
 
-# Listing prep for EarSheet: Music to Sheet (com.ragnus.earsheet) version 1.0: metadata, URLs,
+# Listing prep for AI Music Radar (com.ragnus.pnge, ASC app 6818838017) version 1.0: metadata, URLs,
 # categories, copyright, App Review contact, age rating, export compliance, attach build,
 # screenshots, then a read-only verification. NEVER submits for review
 # (that is asc-submit-app-store.yml, run by hand).
@@ -38,7 +38,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          BUNDLE_ID: com.ragnus.earsheet
+          BUNDLE_ID: com.ragnus.pnge
           VERSION_STRING: "1.0"
           BUILD_NUMBER: ${{ inputs.build_number }}
           UPLOAD_SCREENSHOTS: ${{ inputs.screenshots }}

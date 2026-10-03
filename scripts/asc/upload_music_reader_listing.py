@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the App Store listing of EarSheet: Music to Sheet (com.ragnus.earsheet, version 1.0, en-US).
+"""Prepare the App Store listing of AI Music Radar (com.ragnus.pnge, ASC app 6818838017, version 1.0, en-US).
 
 Listing prep only. This script NEVER creates a review submission and never submits for review
 (that is .github/workflows/asc-submit-app-store.yml, run by hand by the owner).
@@ -18,7 +18,7 @@ version + (UPLOAD_SCREENSHOTS=true) replace screenshots, then a read-only verifi
 1 if anything is off. VERIFY_ONLY=true skips every write.
 
 Env: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8,
-     BUNDLE_ID (com.ragnus.earsheet), VERSION_STRING (1.0), BUILD_NUMBER (15),
+     BUNDLE_ID (com.ragnus.pnge), VERSION_STRING (1.0), BUILD_NUMBER (15),
      UPLOAD_SCREENSHOTS (true/false), VERIFY_ONLY (true/false), SKIP_IF_NOT_EDITABLE (true/false)
 Used by asc-music-reader-upload.yml and, before submitting, by asc-submit-app-store.yml (sync_listing).
 """
@@ -36,7 +36,7 @@ SHOT_TYPES = {"iphone-69": ("APP_IPHONE_67", (1320, 2868)), "ipad-13": ("APP_IPA
 BASE = "https://api.appstoreconnect.apple.com"
 EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY"}
 
-BUNDLE_ID = os.environ.get("BUNDLE_ID", "com.ragnus.earsheet").strip()
+BUNDLE_ID = os.environ.get("BUNDLE_ID", "com.ragnus.pnge").strip()
 VERSION = os.environ.get("VERSION_STRING", "1.0").strip()
 BUILD_NUMBER = os.environ.get("BUILD_NUMBER", "15").strip()
 # Submit workflow sync: a version still in review is left alone (the submit step cancels + resubmits)

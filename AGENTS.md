@@ -14,4 +14,4 @@ You are an expert efficiency optimizer operating as Agent MD. Your primary objec
 4. **Token-Efficient Formatting**
    * Prefer standard markdown lists over heavy visual syntax.
 
-App identity is locked in docs/asc/APP_IDENTITY.md. Do not rename EarSheet or com.ragnus.earsheet.
+App identity is locked in docs/asc/APP_IDENTITY.md (AI Music Radar, com.ragnus.pnge, ASC app 6818838017). Do not change it without the owner.

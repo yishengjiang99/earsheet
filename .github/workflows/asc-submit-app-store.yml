@@ -33,7 +33,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          BUNDLE_ID: com.ragnus.earsheet
+          BUNDLE_ID: com.ragnus.pnge
           VERSION_STRING: ${{ inputs.version_string }}
           BUILD_NUMBER: ${{ inputs.build_number }}
           UPLOAD_SCREENSHOTS: "true"
@@ -52,7 +52,7 @@ jobs:
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           BUILD_NUMBER: ${{ inputs.build_number }}
           VERSION_STRING: ${{ inputs.version_string }}
-          BUNDLE_ID: com.ragnus.earsheet
+          BUNDLE_ID: com.ragnus.pnge
           PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
@@ -861,7 +861,7 @@ jobs:
                 raise SystemExit(
                   'Submit blocked: App Privacy nutrition label is not published. '
                   'The API cannot set it. In App Store Connect open '
-                  'EarSheet: Music to Sheet → App Privacy → Get Started → '
+                  'AI Music Radar → App Privacy → Get Started → '
                   'No, we do not collect data from this app → Publish, then re-run. '
                   'Privacy policy, support URL, content rights, and the free price '
                   'are already set. Terms of Use stays on '

@@ -1,6 +1,6 @@
 name: ASC cancel review (pull from review)
 
-# Pulls EarSheet: Music to Sheet (com.ragnus.earsheet) out of App Review by cancelling the open
+# Pulls AI Music Radar (com.ragnus.pnge, ASC app 6818838017) out of App Review by cancelling the open
 # reviewSubmission (PATCH canceled=true), then polls until the version is editable again
 # (DEVELOPER_REJECTED / PREPARE_FOR_SUBMISSION). Never submits anything.
 # By default only WAITING_FOR_REVIEW / UNRESOLVED_ISSUES submissions are cancelled; an
@@ -28,7 +28,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
-          BUNDLE_ID: com.ragnus.earsheet
+          BUNDLE_ID: com.ragnus.pnge
           VERSION_STRING: "1.0"
           ALLOW_IN_REVIEW: ${{ inputs.allow_in_review }}
           PYTHONUNBUFFERED: "1"

@@ -53,15 +53,15 @@ jobs:
             xcrun simctl bootstatus "$id" -b
             xcrun simctl status_bar "$id" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
             xcrun simctl install "$id" "$APP"
-            xcrun simctl launch "$id" com.ragnus.earsheet
+            xcrun simctl launch "$id" com.ragnus.pnge
             sleep 8
             xcrun simctl io "$id" screenshot "shots/${label}-01-launch.png"
             sips -g pixelWidth -g pixelHeight "shots/${label}-01-launch.png"
             # Debug-only deep links (Sources/App/ScreenshotDemo.swift): -OMRScreenshot <route>
             local n=2
             for route in result player library settings; do
-              xcrun simctl terminate "$id" com.ragnus.earsheet || true
-              xcrun simctl launch "$id" com.ragnus.earsheet -OMRScreenshot "$route"
+              xcrun simctl terminate "$id" com.ragnus.pnge || true
+              xcrun simctl launch "$id" com.ragnus.pnge -OMRScreenshot "$route"
               sleep 10
               xcrun simctl io "$id" screenshot "shots/${label}-0${n}-${route}.png"
               n=$((n + 1))

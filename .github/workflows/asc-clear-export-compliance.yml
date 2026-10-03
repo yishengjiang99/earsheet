@@ -19,7 +19,7 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
           BUILD_NUMBER: ${{ inputs.build_number }}
-          BUNDLE_ID: com.ragnus.earsheet
+          BUNDLE_ID: com.ragnus.pnge
         run: |
           set -euo pipefail
           python3 - <<'PY'

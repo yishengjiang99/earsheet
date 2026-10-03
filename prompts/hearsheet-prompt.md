@@ -7,9 +7,9 @@ Build the listen-to-sheet app in this repo. Do not rename it, do not add a secon
 Repo: https://github.com/yishengjiang99/earsheet (private).
 Sibling synth: https://github.com/yishengjiang99/omr-sheet-cam `Packages/SF2Player`. Vendor that package. Do not port another SoundFont engine.
 
-- App Store name: EarSheet: Music to Sheet
-- Home screen: EarSheet
-- Bundle id: com.ragnus.earsheet
+- App Store name: AI Music Radar (ASC app 6818838017, SKU SI-music-radar)
+- Home screen: AI Music Radar
+- Bundle id: com.ragnus.pnge
 - Team: 83D36RPMUM
 - Scheme / project: EarSheet, EarSheet.xcodeproj
 - iOS 17+. License AGPL-3.0-or-later. Basic Pitch is Apache-2.0. Update NOTICE.

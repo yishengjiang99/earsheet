@@ -24,7 +24,7 @@ struct ContentView: View {
                     failedView(message: message, offersImport: offersImport)
                 }
             }
-            .navigationTitle("EarSheet")
+            .navigationTitle("AI Music Radar")
             .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: $showImporter) {
@@ -36,7 +36,7 @@ struct ContentView: View {
         .sheet(isPresented: $showShare) {
             ShareSheet(items: store.shareItems())
         }
-        .alert("EarSheet", isPresented: Binding(
+        .alert("AI Music Radar", isPresented: Binding(
             get: { store.notice != nil },
             set: { if !$0 { store.clearNotice() } }
         )) {

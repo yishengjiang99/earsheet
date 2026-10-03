@@ -1,6 +1,6 @@
 name: iOS TestFlight
 
-# Archive EarSheet (EarSheet: Music to Sheet, com.ragnus.earsheet), bundle the pinned homr ONNX
+# Archive EarSheet (ASC app "AI Music Radar", id 6818838017, com.ragnus.pnge), bundle the pinned homr ONNX
 # models (scripts/fetch-models, never committed), sign with the App Store profile, upload with
 # altool. The job FAILS if altool reports any error (no false greens).
 
@@ -27,11 +27,15 @@ jobs:
       ARCHIVE_PATH: ${{ github.workspace }}/build/EarSheet.xcarchive
       EXPORT_PATH: ${{ github.workspace }}/build/export
       TEAM_ID: 83D36RPMUM
-      BUNDLE_ID: com.ragnus.earsheet
+      BUNDLE_ID: com.ragnus.pnge
       SCHEME: EarSheet
       PROJECT: EarSheet.xcodeproj
-      # App Store provisioning profile for com.ragnus.earsheet (cert YXDKHJC7J9, Apple Distribution: GrepAwk LLC)
-      PROFILE_NAME: EarSheet Music to Sheet App Store
+      # ASC app record "AI Music Radar" (SKU SI-music-radar). The workflow fails unless its bundleId == BUNDLE_ID.
+      ASC_APP_ID: "6818838017"
+      # App Store provisioning profile for com.ragnus.pnge signed by the IOS_DISTRIBUTION_P12 cert
+      # (Apple Distribution: GrepAwk LLC). Taken from secret IOS_APPSTORE_PROFILE_PNGE_BASE64 if set,
+      # else looked up read-only via the ASC API (active IOS_APP_STORE profile for the bundle id).
+      # PROFILE_NAME is exported by the install step.
       BUILD_NUMBER: ${{ github.run_number }}
 
     steps:
@@ -80,33 +84,111 @@ jobs:
           cp "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
 
+      - name: Check ASC app record (read-only)
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          pip3 install -q --break-system-packages PyJWT cryptography 2>/dev/null || pip3 install -q PyJWT cryptography
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          import jwt
+          p8 = os.environ["P8"].replace("\\n", "\n").strip()
+          now = int(time.time())
+          t = jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": now, "exp": now + 1100,
+                          "aud": "appstoreconnect-v1"}, p8, algorithm="ES256",
+                         headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"].strip()})
+          def get(path):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": "Bearer " + t})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.loads(r.read().decode() or "{}")
+          a = get(f"/v1/apps/{os.environ['ASC_APP_ID']}")["data"]["attributes"]
+          print("ASC app", os.environ["ASC_APP_ID"], "name=", a.get("name"), "bundleId=", a.get("bundleId"), "sku=", a.get("sku"))
+          for info in get(f"/v1/apps/{os.environ['ASC_APP_ID']}/appInfos")["data"]:
+              for loc in get(f"/v1/appInfos/{info['id']}/appInfoLocalizations")["data"]:
+                  la = loc["attributes"]
+                  print("appInfo", info["attributes"].get("appStoreState") or info["attributes"].get("state"), la.get("locale"), "name=", la.get("name"), "subtitle=", la.get("subtitle"))
+          if a.get("bundleId") != os.environ["BUNDLE_ID"]:
+              raise SystemExit(f"::error::ASC app {os.environ['ASC_APP_ID']} has bundleId {a.get('bundleId')!r}, expected {os.environ['BUNDLE_ID']!r}")
+          PY
+
       - name: Install Distribution cert + App Store profile
         env:
           P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
-          PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+          PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_PNGE_BASE64 }}
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
           set -euo pipefail
-          test -n "${P12_BASE64:-}" && test -n "${P12_PASSWORD:-}" && test -n "${PROFILE_BASE64:-}"
+          test -n "${P12_BASE64:-}" && test -n "${P12_PASSWORD:-}"
           CERT_PATH=$RUNNER_TEMP/dist.p12
           PROFILE_PATH=$RUNNER_TEMP/appstore.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
           echo -n "$P12_BASE64" | base64 --decode > "$CERT_PATH"
-          echo -n "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | sed s/\"//g)
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | tee "$RUNNER_TEMP/identities.txt"
+          # SHA-1 of the distribution identity in the p12 (upper-case hex)
+          export CERT_SHA1=$(grep -m1 -Eo '[0-9A-F]{40}' "$RUNNER_TEMP/identities.txt")
+          test -n "$CERT_SHA1"
+          if [ -n "${PROFILE_BASE64:-}" ]; then
+            echo "Using profile from secret IOS_APPSTORE_PROFILE_PNGE_BASE64"
+            echo -n "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          else
+            echo "Looking up an App Store profile for $BUNDLE_ID via the ASC API (read-only)"
+            python3 - <<'PY'
+          import base64, hashlib, json, os, plistlib, subprocess, time, urllib.request
+          import jwt
+          p8 = os.environ["P8"].replace("\\n", "\n").strip()
+          now = int(time.time())
+          t = jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": now, "exp": now + 1100,
+                          "aud": "appstoreconnect-v1"}, p8, algorithm="ES256",
+                         headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"].strip()})
+          def get(path):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": "Bearer " + t})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.loads(r.read().decode() or "{}")
+          bid = os.environ["BUNDLE_ID"]
+          ids = [b for b in get(f"/v1/bundleIds?filter[identifier]={bid}&limit=50")["data"] if b["attributes"]["identifier"] == bid]
+          if not ids:
+              raise SystemExit(f"::error::bundle id {bid} is not registered in the Developer portal")
+          want = os.environ["CERT_SHA1"].upper()
+          found = None
+          for b in ids:
+              for pr in get(f"/v1/bundleIds/{b['id']}/profiles?limit=200")["data"]:
+                  a = pr["attributes"]
+                  print("profile", a.get("name"), a.get("profileType"), a.get("profileState"), a.get("expirationDate"))
+                  if a.get("profileType") != "IOS_APP_STORE" or a.get("profileState") != "ACTIVE":
+                      continue
+                  raw = base64.b64decode(a["profileContent"])
+                  xml = subprocess.run(["security", "cms", "-D"], input=raw, capture_output=True, check=True).stdout
+                  certs = [hashlib.sha1(c).hexdigest().upper() for c in plistlib.loads(xml).get("DeveloperCertificates", [])]
+                  if want in certs:
+                      found = raw
+                      break
+                  print("  (does not contain the p12 distribution cert)")
+              if found:
+                  break
+          if not found:
+              raise SystemExit(f"::error::no ACTIVE IOS_APP_STORE profile for {bid} that includes the distribution cert {want}. "
+                               "Create an App Store profile for this bundle id in the Developer portal (or set secret IOS_APPSTORE_PROFILE_PNGE_BASE64).")
+          open(os.path.join(os.environ["RUNNER_TEMP"], "appstore.mobileprovision"), "wb").write(found)
+          PY
+          fi
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
-          NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
+          security cms -D -i "$PROFILE_PATH" > "$RUNNER_TEMP/profile.plist"
+          UUID=$(plutil -extract UUID raw "$RUNNER_TEMP/profile.plist")
+          NAME=$(plutil -extract Name raw "$RUNNER_TEMP/profile.plist")
+          APPID=$(plutil -extract Entitlements.application-identifier raw "$RUNNER_TEMP/profile.plist")
           cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
-          echo "Installed profile UUID=$UUID Name=$NAME"
-          test "$NAME" = "$PROFILE_NAME"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          echo "Installed profile UUID=$UUID Name=$NAME application-identifier=$APPID"
+          test "$APPID" = "$TEAM_ID.$BUNDLE_ID"
+          echo "PROFILE_NAME=$NAME" >> "$GITHUB_ENV"
 
       - name: Pin manual signing on the app target (CI only)
         run: |
@@ -117,7 +199,7 @@ jobs:
           import os, re
           p = "EarSheet.xcodeproj/project.pbxproj"
           s = open(p).read()
-          anchor = "\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.ragnus.earsheet;\n"
+          anchor = "\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.ragnus.pnge;\n"
           n = s.count(anchor)
           assert n == 2, f"expected 2 app configs, found {n}"
           add = (
@@ -309,7 +391,7 @@ jobs:
               req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": "Bearer " + tok()})
               with urllib.request.urlopen(req, timeout=60) as r:
                   return json.loads(r.read().decode() or "{}")
-          app = get(f"/v1/apps?filter[bundleId]={os.environ['BUNDLE_ID']}")["data"][0]["id"]
+          app = os.environ["ASC_APP_ID"]
           want = os.environ["BUILD_NUMBER"]
           deadline = time.time() + 40 * 60
           state = None
@@ -334,7 +416,7 @@ jobs:
         run: |
           {
             echo "### TestFlight upload"
-            echo "- Bundle: \`$BUNDLE_ID\`"
+            echo "- App: AI Music Radar (ASC $ASC_APP_ID), bundle \`$BUNDLE_ID\`"
             echo "- Build: \`$BUILD_NUMBER\` (version 1.0)"
             echo "- Notes: $NOTES"
             echo "- Processing takes a few minutes; then run *ASC assign Internal Testing* with this build number."

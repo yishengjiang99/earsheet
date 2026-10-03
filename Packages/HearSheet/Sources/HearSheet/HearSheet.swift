@@ -92,7 +92,7 @@ public struct QuantizedScore: Equatable, Sendable {
 }
 
 public enum HearSheet {
-    public static let bundleIdentifier = "com.ragnus.earsheet"
+    public static let bundleIdentifier = "com.ragnus.pnge"
     public static let modelName = "BasicPitchPoly"
     /// Model contract (BasicPitch_nmp): mono 22050 Hz waveform in, posteriorgrams out.
     public static let sampleRate = 22050.0
