@@ -67,6 +67,18 @@ public struct QuantizedNote: Equatable, Sendable, Codable, Hashable {
     }
 }
 
+/// Grand-staff rule shared by the engraved page (screen, PDF, photo) and MusicXML:
+/// a score with any note below middle C gets a braced treble + bass staff, split at C4
+/// (MIDI 60): notes >= 60 on the treble staff, < 60 on the bass staff.
+/// The stored `QuantizedNote.staff` is ignored (older takes were saved all-treble).
+public enum GrandStaff {
+    public static let splitMidi = 60
+    public static func staff(forMidi midi: Int) -> Int { midi >= splitMidi ? 0 : 1 }
+    public static func isNeeded(_ score: QuantizedScore) -> Bool {
+        score.notes.contains { $0.midi < splitMidi }
+    }
+}
+
 /// The full transcription result: quantized notes plus the estimated musical context.
 public struct QuantizedScore: Equatable, Sendable, Codable, Hashable {
     public var notes: [QuantizedNote]

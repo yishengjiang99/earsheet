@@ -14,12 +14,12 @@ public enum MusicXMLWriter {
 
     public static func xml(score: QuantizedScore) -> String {
         var w = Writer()
-        let grand = useGrandStaff(score: score)
+        let grand = GrandStaff.isNeeded(score)
         let staves = grand ? 2 : 1
         // Assign staves: bass staff holds notes below middle C on grand staff.
         let notes: [QuantizedNote] = score.notes.map { n in
             var m = n
-            m.staff = (grand && n.midi < 60) ? 1 : 0
+            m.staff = grand ? GrandStaff.staff(forMidi: n.midi) : 0
             return m
         }
         let sixteenthsPerBar = score.meter.beatsPerBar * 16 / score.meter.beatUnit
@@ -80,18 +80,6 @@ public enum MusicXMLWriter {
     }
 
     // MARK: - Grand staff decision
-
-    private static func useGrandStaff(score: QuantizedScore) -> Bool {
-        let midis = score.notes.map(\.midi)
-        guard let lo = midis.min(), let hi = midis.max() else { return false }
-        guard hi - lo > 12, lo < 60, hi > 60 else { return false }
-        // A chord needs two staves when simultaneous notes straddle middle C.
-        var byStart: [Int: [Int]] = [:]
-        for n in score.notes { byStart[n.start16, default: []].append(n.midi) }
-        return byStart.values.contains { group in
-            group.contains(where: { $0 < 60 }) && group.contains(where: { $0 >= 60 })
-        }
-    }
 
     // MARK: - Staff events
 

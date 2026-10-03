@@ -21,11 +21,17 @@ public enum Engraver {
         public var noteIndex: Int
         public var headCenter: CGPoint
         public var frame: CGRect
+        /// 0 = treble, 1 = bass.
+        public var staff: Int
+        public var ledgerLineCount: Int
     }
 
     public struct Page {
         public var size: CGSize
         public var notes: [EngravedNote]
+        /// Vertical extent of each system including ledger lines, stems and clefs (never overlapping).
+        public var systemFrames: [CGRect]
+        public var isGrandStaff: Bool
         /// Internal layout used by `draw`.
         fileprivate var layout: Layout
     }
@@ -45,7 +51,9 @@ public enum Engraver {
     public static func layout(score: QuantizedScore, width: CGFloat, style: Style = Style()) -> Page {
         let l = Layout(score: score, width: width, style: style)
         return Page(size: l.size,
-                    notes: l.noteEntries.map { EngravedNote(noteIndex: $0.noteIndex, headCenter: $0.head, frame: $0.frame) },
+                    notes: l.noteEntries.map { EngravedNote(noteIndex: $0.noteIndex, headCenter: $0.head, frame: $0.frame,
+                                                            staff: $0.staff, ledgerLineCount: $0.ledgerYs.count) },
+                    systemFrames: l.systemFrames, isGrandStaff: l.grandStaff,
                     layout: l)
     }
 
@@ -117,11 +125,15 @@ private struct Layout {
     let clefs: [(x: CGFloat, y: CGFloat, glyph: String, size: CGFloat, staff: Int, system: Int)]
     let keySig: [(x: CGFloat, y: CGFloat, glyph: String, staff: Int, system: Int)]
     let timeSig: [(x: CGFloat, y: CGFloat, text: String, staff: Int, system: Int)]
+    let braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)]
+    let systemFrames: [CGRect]
 
     init(score: QuantizedScore, width: CGFloat, style: Engraver.Style) {
         let s = style.staffSpace
-        let grand = score.notes.contains(where: { $0.staff == 1 })
+        let grand = GrandStaff.isNeeded(score)
         self.grandStaff = grand
+        // Staff per note from pitch (split at middle C), not the stored `staff`.
+        let staffOf: [Int] = score.notes.map { grand ? GrandStaff.staff(forMidi: $0.midi) : 0 }
         let stavesPerSystem = grand ? 2 : 1
 
         let sixteenthsPerBar = score.meter.beatsPerBar * 16 / score.meter.beatUnit
@@ -142,7 +154,9 @@ private struct Layout {
         var systems: [[Int]] = []
         var cur: [Int] = []
         var curW: CGFloat = 0
-        let contentW = width - style.leftMargin - style.rightMargin
+        // Grand staff: room for the brace left of the system.
+        let braceRoom: CGFloat = grand ? 10 : 0
+        let contentW = width - style.leftMargin - braceRoom - style.rightMargin
         for (i, w) in measureWidths.enumerated() {
             if !cur.isEmpty, curW + w > contentW {
                 systems.append(cur); cur = []; curW = 0
@@ -159,15 +173,20 @@ private struct Layout {
         var timeSig: [(x: CGFloat, y: CGFloat, text: String, staff: Int, system: Int)] = []
         var noteEntries: [NoteEntry] = []
         var beamGroups: [BeamGroup] = []
+        var braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)] = []
+        var systemFrames: [CGRect] = []
 
         var y = style.topMargin
+        var prevBottom: CGFloat = 0 // bottom extent of the previous system
         let keyFifths = score.key.fifths
         let preferSharps = keyFifths >= 0
 
         for (sysIdx, sys) in systems.enumerated() {
             let sysTop = y
+            let marks = (lines: staffLines.count, bars: barlines.count, clefs: clefs.count, keys: keySig.count,
+                         times: timeSig.count, notes: noteEntries.count, braces: braces.count)
             let sysW = sys.reduce(0) { $0 + measureWidths[$1] }
-            let x0 = style.leftMargin
+            let x0 = style.leftMargin + braceRoom
             let x1 = x0 + min(contentW, sysW)
 
             // Staff lines.
@@ -216,8 +235,8 @@ private struct Layout {
                 // Notes in this bar, per staff.
                 for staff in 0..<stavesPerSystem {
                     let staffTop = sysTop + CGFloat(staff) * (4 * s + style.grandStaffGap)
-                    let barNotes = score.notes.enumerated().filter { _, n in
-                        n.staff == staff && n.start16 >= barStart16 && n.start16 < barEnd16
+                    let barNotes = score.notes.enumerated().filter { i, n in
+                        staffOf[i] == staff && n.start16 >= barStart16 && n.start16 < barEnd16
                     }
                     // Chord grouping by start16.
                     var byOnset: [Int: [Int]] = [:]
@@ -274,7 +293,41 @@ private struct Layout {
                 }
                 mx += mw
             }
-            y += systemHeight + style.systemGap
+            if grand {
+                // Brace + system-start line joining the two staves.
+                barlines.append((x: x0, y0: sysTop, y1: sysTop + systemHeight, final: false))
+                braces.append((x: x0 - braceRoom, y0: sysTop, y1: sysTop + systemHeight))
+            }
+
+            // Vertical extent: staves + clef overhang, plus heads, ledger lines, stems and accidentals.
+            var top = sysTop - s * 2
+            var bottom = sysTop + systemHeight + s * 1.5
+            for e in noteEntries[marks.notes...] {
+                top = min(top, e.head.y - s * 1.3)
+                bottom = max(bottom, e.head.y + s * 1.3)
+                if e.stemmed { top = min(top, e.stemEndY - s); bottom = max(bottom, e.stemEndY + s) }
+                for ly in e.ledgerYs { top = min(top, ly - s * 0.5); bottom = max(bottom, ly + s * 0.5) }
+            }
+            // Shift this system down if its content would reach into the previous system.
+            let minGap: CGFloat = sysIdx == 0 ? 4 : s * 1.5
+            let dy = max(0, prevBottom + minGap - top)
+            if dy > 0 {
+                for i in marks.lines..<staffLines.count { staffLines[i].y += dy }
+                for i in marks.bars..<barlines.count { barlines[i].y0 += dy; barlines[i].y1 += dy }
+                for i in marks.clefs..<clefs.count { clefs[i].y += dy }
+                for i in marks.keys..<keySig.count { keySig[i].y += dy }
+                for i in marks.times..<timeSig.count { timeSig[i].y += dy }
+                for i in marks.braces..<braces.count { braces[i].y0 += dy; braces[i].y1 += dy }
+                for i in marks.notes..<noteEntries.count {
+                    noteEntries[i].head.y += dy
+                    noteEntries[i].frame.origin.y += dy
+                    noteEntries[i].stemEndY += dy
+                    noteEntries[i].ledgerYs = noteEntries[i].ledgerYs.map { $0 + dy }
+                }
+            }
+            systemFrames.append(CGRect(x: 0, y: top + dy, width: width, height: bottom - top))
+            prevBottom = bottom + dy
+            y = sysTop + dy + systemHeight + style.systemGap
         }
 
         // Accidentals from key spelling (per measure reset).
@@ -285,7 +338,7 @@ private struct Layout {
         beamPass(score: score, entries: &noteEntries, beamGroups: &beamGroups,
                  sixteenthsPerBar: sixteenthsPerBar, beatUnit: score.meter.beatUnit)
 
-        self.size = CGSize(width: width, height: y - style.systemGap + 20)
+        self.size = CGSize(width: width, height: max(y - style.systemGap, prevBottom) + 20)
         self.noteEntries = noteEntries
         self.beamGroups = beamGroups
         self.staffLines = staffLines
@@ -293,6 +346,8 @@ private struct Layout {
         self.clefs = clefs
         self.keySig = keySig
         self.timeSig = timeSig
+        self.braces = braces
+        self.systemFrames = systemFrames
     }
 }
 
@@ -470,6 +525,9 @@ private struct Renderer {
                 line(x0: b.x, y0: b.y0, x1: b.x, y1: b.y1, width: 1)
             }
         }
+        for b in layout.braces {
+            brace(x: b.x, y0: b.y0, y1: b.y1)
+        }
         for c in layout.clefs {
             drawText(c.glyph, at: CGPoint(x: c.x, y: c.y), size: c.size)
         }
@@ -567,6 +625,20 @@ private struct Renderer {
             ctx.fillPath()
             ctx.restoreGState()
         }
+    }
+
+    /// A curly brace spanning y0...y1 with its point at the left (x).
+    mutating func brace(x: CGFloat, y0: CGFloat, y1: CGFloat) {
+        let m = (y0 + y1) / 2, q = (y1 - y0) / 4, w: CGFloat = 7
+        ctx.saveGState()
+        ctx.move(to: CGPoint(x: x + w, y: y0))
+        ctx.addCurve(to: CGPoint(x: x, y: m), control1: CGPoint(x: x - w * 0.4, y: y0 + q), control2: CGPoint(x: x + w * 1.2, y: m - q))
+        ctx.addCurve(to: CGPoint(x: x + w, y: y1), control1: CGPoint(x: x + w * 1.2, y: m + q), control2: CGPoint(x: x - w * 0.4, y: y1 - q))
+        ctx.addCurve(to: CGPoint(x: x + 1.2, y: m), control1: CGPoint(x: x + w * 0.2, y: y1 - q), control2: CGPoint(x: x + w * 1.7, y: m + q))
+        ctx.addCurve(to: CGPoint(x: x + w, y: y0), control1: CGPoint(x: x + w * 1.7, y: m - q), control2: CGPoint(x: x + w * 0.2, y: y0 + q))
+        ctx.closePath()
+        ctx.fillPath()
+        ctx.restoreGState()
     }
 
     mutating func line(x0: CGFloat, y0: CGFloat, x1: CGFloat, y1: CGFloat, width: CGFloat) {

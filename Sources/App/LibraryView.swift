@@ -18,9 +18,12 @@ struct LibraryView: View {
     @State private var showPaywall = false
     @State private var showSettings = false
     @State private var pendingScore: (score: QuantizedScore, title: String?)?
+    /// Library > Take only: finished recordings and imports replace the path with their take.
+    @State private var path: [Take] = []
+    @State private var takeToOpen: Take?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack(alignment: .bottom) {
                 List {
                     if !library.samples.isEmpty {
@@ -77,7 +80,7 @@ struct LibraryView: View {
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
-                SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
+                SheetDetailView(take: take, library: library, proStore: proStore, onRecord: startListening)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -116,13 +119,19 @@ struct LibraryView: View {
                 onCancel: { showVideoPicker = false }
             )
         }
-        .fullScreenCover(isPresented: $showListening) {
+        .fullScreenCover(isPresented: $showListening, onDismiss: {
+            if let take = takeToOpen {
+                takeToOpen = nil
+                path = [take]
+            }
+        }) {
             if let session = listeningSession {
                 NavigationStack {
-                    ListeningView(session: session, proStore: proStore, triggers: triggers)
-                        .navigationDestination(for: Take.self) { take in
-                            SheetDetailView(take: take, library: library, proStore: proStore, triggers: triggers)
-                        }
+                    ListeningView(session: session, proStore: proStore, triggers: triggers,
+                                  onSaved: { take in
+                                      takeToOpen = take
+                                      showListening = false
+                                  })
                 }
             }
         }
@@ -139,9 +148,9 @@ struct LibraryView: View {
                 pendingScore = nil
                 showPaywall = false
                 if let title = pending.title {
-                    _ = library.addTake(title: title, score: pending.score)
+                    open(library.addTake(title: title, score: pending.score))
                 } else {
-                    _ = library.addTake(score: pending.score)
+                    open(library.addTake(score: pending.score))
                 }
             }
         }
@@ -153,6 +162,11 @@ struct LibraryView: View {
         } message: {
             Text(library.notice ?? "")
         }
+    }
+
+    /// Shows `take` as Library > Take (replaces any open take).
+    private func open(_ take: Take) {
+        path = [take]
     }
 
     private func startListening() {
@@ -183,9 +197,9 @@ struct LibraryView: View {
                 library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
             }
         } else if let title {
-            _ = library.addTake(title: title, score: score)
+            open(library.addTake(title: title, score: score))
         } else {
-            _ = library.addTake(score: score)
+            open(library.addTake(score: score))
         }
     }
 
@@ -266,7 +280,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
-                    _ = library.addTake(score: score)
+                    open(library.addTake(score: score))
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.

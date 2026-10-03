@@ -33,7 +33,7 @@ final class ListeningSession: ObservableObject {
     @Published private(set) var notice: String?
     @Published var saveLimitReached = false
 
-    private let library: TakeLibrary
+    let library: TakeLibrary
     private let proStore: ProStore
     private let triggers: PaywallTriggers
     private var pendingTake: Take?
@@ -173,6 +173,9 @@ final class ListeningSession: ObservableObject {
 
     func clearNotice() { notice = nil }
 
+    /// True while the finished take is held by the free save limit (not in the library yet).
+    var holdsPendingTake: Bool { pendingTake != nil }
+
     /// Save the pending take after the user upgrades to Pro.
     func savePendingTake() {
         guard let take = pendingTake else { return }
@@ -206,6 +209,9 @@ struct ListeningView: View {
     @StateObject var session: ListeningSession
     @ObservedObject var proStore: ProStore
     @ObservedObject var triggers: PaywallTriggers
+    /// Called when the finished take is in the library: the presenter closes this screen and
+    /// opens the take (Library > Take), so back never returns to listening.
+    var onSaved: ((Take) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -223,9 +229,23 @@ struct ListeningView: View {
                 failedBody(message: message)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Ink.paper)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsHeldTake {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { dismiss() }) {
+                        Label("Library", systemImage: "chevron.left")
+                            .labelStyle(.titleAndIcon)
+                    }
+                }
+            }
+        }
         .onAppear { session.start() }
+        .onChange(of: session.phase) { _, phase in
+            if case .done(let take) = phase, !session.holdsPendingTake { onSaved?(take) }
+        }
         .alert("AI Music Radar", isPresented: Binding(
             get: { session.notice != nil },
             set: { if !$0 { session.clearNotice() } }
@@ -243,7 +263,10 @@ struct ListeningView: View {
             }
         }
         .onChange(of: proStore.isPro) { _, isPro in
-            if isPro { session.savePendingTake() }
+            if isPro, session.holdsPendingTake {
+                session.savePendingTake()
+                if case .done(let take) = session.phase { onSaved?(take) }
+            }
         }
     }
 
@@ -304,21 +327,20 @@ struct ListeningView: View {
         }
     }
 
+    private var showsHeldTake: Bool {
+        if case .done = session.phase { return session.holdsPendingTake }
+        return false
+    }
+
+    /// No interstitial: a saved take closes this screen and opens in the library's stack
+    /// (`onSaved`). Only a take held by the free save limit is shown here, in place, with the
+    /// paywall sheet and a Library back button.
+    @ViewBuilder
     private func doneBody(take: Take) -> some View {
-        VStack(spacing: 20) {
-            Spacer()
-            Text("The page is ready.")
-                .font(.system(.title2, design: .serif))
-            NavigationLink(value: take) {
-                Text("View sheet music")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 14)
-                    .background(Ink.teal, in: Capsule())
-            }
-            Button("Back to library") { dismiss() }
-            Spacer()
+        if showsHeldTake {
+            SheetDetailView(take: take, library: session.library, proStore: proStore)
+        } else {
+            Color.clear
         }
     }
 
