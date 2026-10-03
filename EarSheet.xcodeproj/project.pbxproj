@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F00000000000000000000005 /* HearSheet in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000003 /* HearSheet */; };
+		F00000000000000000000006 /* SF2Player in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000004 /* SF2Player */; };
+		F00000000000000000000008 /* HearSheet in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000003 /* HearSheet */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		EA0000000000000000000001 /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = E90000000000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = E50000000000000000000001; remoteInfo = EarSheet; };
 /* End PBXContainerItemProxy section */
@@ -25,6 +31,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F00000000000000000000005 /* HearSheet in Frameworks */,
+				F00000000000000000000006 /* SF2Player in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -32,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F00000000000000000000008 /* HearSheet in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,6 +89,7 @@
 			buildConfigurationList = E80000000000000000000003 /* Build configuration list for PBXNativeTarget "EarSheet" */;
 			buildPhases = (
 				E30000000000000000000001 /* Frameworks */,
+				F00000000000000000000007 /* Bundle models */,
 				E60000000000000000000001 /* Sources */,
 			);
 			buildRules = (
@@ -90,6 +100,10 @@
 				E20000000000000000000001 /* App */,
 			);
 			name = EarSheet;
+			packageProductDependencies = (
+				F00000000000000000000003 /* HearSheet */,
+				F00000000000000000000004 /* SF2Player */,
+			);
 			productName = EarSheet;
 			productReference = E10000000000000000000001 /* EarSheet.app */;
 			productType = "com.apple.product-type.application";
@@ -110,6 +124,9 @@
 				E20000000000000000000002 /* EarSheetTests */,
 			);
 			name = EarSheetTests;
+			packageProductDependencies = (
+				F00000000000000000000003 /* HearSheet */,
+			);
 			productName = EarSheetTests;
 			productReference = E10000000000000000000002 /* EarSheetTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -141,6 +158,10 @@
 				Base,
 			);
 			mainGroup = E40000000000000000000001;
+			packageReferences = (
+				F00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HearSheet" */,
+				F00000000000000000000002 /* XCLocalSwiftPackageReference "Packages/SF2Player" */,
+			);
 			productRefGroup = E40000000000000000000004 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -150,6 +171,24 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F00000000000000000000007 /* Bundle models */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/models.lock",
+			);
+			name = "Bundle models";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Copies the pinned models (models.lock: BasicPitchPoly.mlpackage + GeneralUser-GS.sf2;\n# fetched by scripts/fetch-models into gitignored models/) into <App>.app/models/. Never committed.\n# Missing models FAIL the build, except test-only builds where OMR_MODELS_DIR or\n# TEST_RUNNER_OMR_MODELS_DIR supplies them at run time (warning, nothing bundled).\nset -eu\nSRC=\"${SRCROOT}/models\"\nLOCK=\"${SRCROOT}/models.lock\"\nDST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/models\"\nnames=$(grep -Ev '^[[:space:]]*(#|$)' \"$LOCK\" | awk '{print $2}')\n[ -n \"$names\" ] || { echo \"error: no models listed in $LOCK\" >&2; exit 1; }\nmissing=\"\"\nfor n in $names; do [ -e \"$SRC/$n\" ] || missing=\"$missing $n\"; done\nif [ -n \"$missing\" ]; then\n  RUNTIME_DIR=\"${OMR_MODELS_DIR:-${TEST_RUNNER_OMR_MODELS_DIR:-}}\"\n  if [ -n \"$RUNTIME_DIR\" ]; then\n    echo \"warning: models not bundled (missing:$missing); test-only build, models from $RUNTIME_DIR at run time\"\n    exit 0\n  fi\n  echo \"error: models missing in $SRC:$missing. Run scripts/fetch-models (pinned in models.lock). Test-only builds may set OMR_MODELS_DIR instead.\" >&2\n  exit 1\nfi\nmkdir -p \"$DST\"\nfor n in $names; do\n  if [ ! -e \"$DST/$n\" ] || [ \"$SRC/$n\" -nt \"$DST/$n\" ]; then mkdir -p \"$(dirname \"$DST/$n\")\"; rm -rf \"$DST/$n\"; cp -Rp \"$SRC/$n\" \"$DST/$n\"; fi\ndone\necho \"Bundled models: $(echo $names | tr ' ' ',')\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E60000000000000000000001 /* Sources */ = {
@@ -320,6 +359,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HearSheet" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HearSheet;
+		};
+		F00000000000000000000002 /* XCLocalSwiftPackageReference "Packages/SF2Player" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SF2Player;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F00000000000000000000003 /* HearSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F00000000000000000000001 /* XCLocalSwiftPackageReference "Packages/HearSheet" */;
+			productName = HearSheet;
+		};
+		F00000000000000000000004 /* SF2Player */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F00000000000000000000002 /* XCLocalSwiftPackageReference "Packages/SF2Player" */;
+			productName = SF2Player;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E90000000000000000000001 /* Project object */;
 }

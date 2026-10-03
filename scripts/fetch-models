@@ -1,29 +1,149 @@
-#!/bin/sh
-# Idempotent. Copies the local fine-tune pin, or no-ops when models.lock has no local line.
-set -eu
-root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-mkdir -p "$root/models"
-lock=$root/models.lock
-if [ ! -s "$lock" ]; then
-  echo "models.lock empty; nothing to fetch"
-  exit 0
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Fetch the pinned EarSheet models into <repo>/models/.
+#
+#   scripts/fetch-models            # download / verify everything in models.lock
+#   MODELS_DIR=/tmp/m scripts/fetch-models
+#
+# models.lock (repo root) has one entry per line, either a download pin:
+#   <sha256>  <name>  <url>
+# or a local bundle line written by scripts/bundle-coreml (verified, not fetched):
+#   local  <path-under-models>  sha256:<hex>
+# <sha256> is the SHA-256 of the downloaded asset (the .zip or the file
+# itself). <name> is the installed name under models/ — a file
+# (GeneralUser-GS.sf2) or a directory (BasicPitchPoly.mlpackage, extracted
+# from a .zip). Blank lines and lines starting with # are skipped.
+#
+# Idempotent: an entry whose stamp already matches is skipped. Exits non-zero
+# on any download, extraction or hash failure; a mismatching file is never
+# left in models/. Weights are never committed (see .gitignore).
+# Needs bash, curl, unzip, and sha256sum or shasum. No Python.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCK="${MODELS_LOCK:-$ROOT/models.lock}"
+DEST="${MODELS_DIR:-$ROOT/models}"
+STAMPS="$DEST/.fetch-stamps"
+
+die() { echo "fetch-models: error: $*" >&2; exit 1; }
+log() { echo "fetch-models: $*" >&2; }
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+  die "need sha256sum or shasum"
 fi
-if grep -q '^local ' "$lock"; then
-  rel=$(awk '/^local / {print $2; exit}' "$lock")
-  src=$root/$rel
-  if [ ! -d "$src" ] && [ -d "$root/build/BasicPitchPoly.mlpackage" ]; then
-    src=$root/build/BasicPitchPoly.mlpackage
+# sha256 over a file or a directory tree. The tree form mirrors
+# scripts/bundle-coreml: sha256 of the concatenation of each file's
+# relative path and bytes, files in byte-sorted order.
+sha256_tree() {
+  if [ -f "$1" ]; then sha256 "$1"; return; fi
+  ( cd "$1" && find . -type f -print0 | LC_ALL=C sort -z |
+    while IFS= read -r -d '' f; do printf '%s' "${f#./}"; cat -- "$f"; done
+  ) | sha256 /dev/stdin
+}
+command -v curl >/dev/null 2>&1 || die "need curl"
+[ -f "$LOCK" ] || die "lock file not found: $LOCK"
+
+mkdir -p "$DEST" "$STAMPS"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/fetch-models.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+fetched=0 skipped=0 failed=0
+while read -r want name url extra || [ -n "${want:-}" ]; do
+  case "${want:-}" in ''|'#'*) continue ;; esac
+  # A "local" line (written by scripts/bundle-coreml after a fine-tune):
+  #   local <path-under-models> sha256:<hex>
+  # Nothing to download; verify the package the bundle step placed.
+  if [ "${want:-}" = "local" ]; then
+    [ -n "${extra:-}" ] && die "malformed local line in $LOCK: local $name $url $extra"
+    _lpath="${name:-}"; _lhash="${url:-}"
+    case "$_lpath" in *".."*|/*|.*|*/.*) die "refusing unsafe local path: $_lpath" ;; esac
+    case "$_lhash" in sha256:[0-9a-f][0-9a-f]*) _want="${_lhash#sha256:}" ;; *)
+      die "malformed local line in $LOCK: local $name" ;; esac
+    _target="$DEST/$_lpath"
+    if [ ! -e "$_target" ]; then
+      log "FAIL   local bundle missing: $_lpath (run scripts/bundle-coreml first)"
+      failed=$((failed + 1)); continue
+    fi
+    _have="$(sha256_tree "$_target")"
+    if [ "$_have" != "$_want" ]; then
+      log "FAIL   sha256 mismatch for local $_lpath: got $_have, want $_want"
+      failed=$((failed + 1)); continue
+    fi
+    log "ok     local $_lpath (sha256 ok)"
+    fetched=$((fetched + 1)); continue
   fi
-  if [ ! -d "$src" ]; then
-    echo "pin missing: $rel (run scripts/bundle-coreml after export)" >&2
-    exit 1
+  if [ -z "${name:-}" ] || [ -z "${url:-}" ] || [ -n "${extra:-}" ] \
+     || ! printf '%s' "$want" | grep -Eq '^[0-9a-f]{64}$'; then
+    die "malformed line in $LOCK: $want $name $url $extra"
   fi
-  if [ "$src" != "$root/models/BasicPitchPoly.mlpackage" ]; then
-    rm -rf "$root/models/BasicPitchPoly.mlpackage"
-    cp -R "$src" "$root/models/BasicPitchPoly.mlpackage"
+  case "$name" in
+    *".."*|/*|.*|*/.*) die "refusing unsafe name: $name" ;;
+  esac
+  target="$DEST/$name"
+  # Flat stamp file per entry (subpaths are flattened with '_').
+  stamp="$STAMPS/$(printf '%s' "$name" | tr '/' '_').sha256"
+  mkdir -p "$(dirname "$target")"
+
+  if [ -e "$target" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+    log "skip   $name (stamp ok)"
+    skipped=$((skipped + 1))
+    continue
   fi
-  echo "models ready $root/models/BasicPitchPoly.mlpackage"
-  exit 0
-fi
-echo "models.lock has no local pin yet"
-exit 0
+  if [ -e "$target" ]; then
+    log "stale  $name - removing and re-downloading"
+    rm -rf "$target" "$stamp"
+  fi
+
+  asset="$TMP/$(basename "$url")"
+  log "fetch  $url"
+  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 -sS -o "$asset" "$url"; then
+    log "FAIL   download failed: $url"
+    failed=$((failed + 1))
+    continue
+  fi
+
+  have="$(sha256 "$asset")"
+  if [ "$have" != "$want" ]; then
+    log "FAIL   sha256 mismatch for $(basename "$url"): got $have, want $want"
+    rm -f "$asset"
+    failed=$((failed + 1))
+    continue
+  fi
+
+  case "$asset" in
+    *.zip)
+      command -v unzip >/dev/null 2>&1 || die "need unzip for $url"
+      if ! unzip -tq "$asset" >/dev/null; then
+        log "FAIL   bad zip: $(basename "$url")"
+        failed=$((failed + 1))
+        continue
+      fi
+      rm -rf "$TMP/x" && mkdir -p "$TMP/x"
+      if ! unzip -oq "$asset" -d "$TMP/x"; then
+        log "FAIL   could not extract $(basename "$url")"
+        failed=$((failed + 1))
+        continue
+      fi
+      if [ ! -e "$TMP/x/$name" ]; then
+        log "FAIL   $name not found inside $(basename "$url")"
+        failed=$((failed + 1))
+        continue
+      fi
+      mv -f "$TMP/x/$name" "$target.part" && mv -f "$target.part" "$target"
+      ;;
+    *)
+      mv -f "$asset" "$target.part" && mv -f "$target.part" "$target"
+      ;;
+  esac
+  printf '%s' "$want" > "$stamp"
+  log "ok     $name"
+  fetched=$((fetched + 1))
+done < "$LOCK"
+
+log "done: $fetched fetched, $skipped skipped, $failed failed -> $DEST"
+[ "$failed" -eq 0 ] || exit 1

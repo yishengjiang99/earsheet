@@ -20,9 +20,26 @@ for p in sorted(pkg.rglob("*")):
     if p.is_file():
         digest.update(p.relative_to(pkg).as_posix().encode())
         digest.update(p.read_bytes())
-line = f"local models/BasicPitchPoly.mlpackage sha256:{digest.hexdigest()}\n"
-(root / "models.lock").write_text("# local fine-tune bundle. Weights stay gitignored.\n" + line)
-print(line.strip())
+local_line = f"local BasicPitchPoly.mlpackage sha256:{digest.hexdigest()}\n"
+# Preserve the stock pins; only the BasicPitchPoly.mlpackage entry is replaced.
+lock = root / "models.lock"
+kept = []
+for raw in lock.read_text().splitlines():
+    s = raw.strip()
+    if not s or s.startswith("#"):
+        kept.append(raw)
+        continue
+    parts = s.split()
+    name = parts[1] if len(parts) >= 2 else ""
+    if parts[0] != "local" and (name == "BasicPitchPoly.mlpackage" or name.startswith("BasicPitchPoly.mlpackage/")):
+        continue  # replaced by the local line below
+    if parts[0] == "local" and (name == "BasicPitchPoly.mlpackage" or name.startswith("BasicPitchPoly.mlpackage/")):
+        continue
+    kept.append(raw)
+kept.append("# local fine-tune bundle (scripts/bundle-coreml). Weights stay gitignored.")
+kept.append(local_line.rstrip("\n"))
+lock.write_text("\n".join(kept) + "\n")
+print(local_line.strip())
 PY
 echo "bundled into models/ and pinned in models.lock"
 echo "Xcode fetch: scripts/fetch-models"

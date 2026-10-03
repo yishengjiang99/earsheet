@@ -1,1 +1,14 @@
-# EarSheet model pins. Empty until BasicPitchPoly.mlpackage is exported.
+# EarSheet model pins. Fetched by scripts/fetch-models into models/ (gitignored, never committed).
+# Format: <sha256 of the downloaded file>  <path under models/>  <url>
+#
+# BasicPitchPoly.mlpackage: the published ICASSP 2022 Basic Pitch Core ML weights
+# (spotify/basic-pitch @ a5ab7392dfb4b3f1d21f7c6106a42cb2a9138799, basic_pitch/saved_models/icassp_2022/nmp.mlpackage),
+# installed here as BasicPitchPoly.mlpackage. Apache-2.0 (see NOTICE).
+# Input: waveform [1, 43844, 1] float32 at 22050 Hz mono.
+# Outputs: note [1, 172, 88] ("Identity_1"), onset [1, 172, 88] ("Identity_2"),
+#          contour [1, 172, 264] ("Identity").
+c1fa5ef8acc34703edcd4e90e9a8640bd4673d9f3a68753c3b9d1ca0365e2928  BasicPitchPoly.mlpackage/Manifest.json  https://raw.githubusercontent.com/spotify/basic-pitch/a5ab7392dfb4b3f1d21f7c6106a42cb2a9138799/basic_pitch/saved_models/icassp_2022/nmp.mlpackage/Manifest.json
+af7bf7d49bc167e0bf0c30aa2ca6b432c3e10df048d2dd4173ff3a738c020858  BasicPitchPoly.mlpackage/Data/com.apple.CoreML/model.mlmodel  https://raw.githubusercontent.com/spotify/basic-pitch/a5ab7392dfb4b3f1d21f7c6106a42cb2a9138799/basic_pitch/saved_models/icassp_2022/nmp.mlpackage/Data/com.apple.CoreML/model.mlmodel
+691a6b63c7ddcdde0ee131ff3986dcb1250df47cd738612efde966ba9b4c99cd  BasicPitchPoly.mlpackage/Data/com.apple.CoreML/weights/weight.bin  https://raw.githubusercontent.com/spotify/basic-pitch/a5ab7392dfb4b3f1d21f7c6106a42cb2a9138799/basic_pitch/saved_models/icassp_2022/nmp.mlpackage/Data/com.apple.CoreML/weights/weight.bin
+# GeneralUser GS SoundFont for SF2MIDIPlayer playback (commit-pinned raw file in yishengjiang99/gbk).
+c278464b823daf9c52106c0957f752817da0e52964817ff682fe3a8d2f8446ce  GeneralUser-GS.sf2  https://raw.githubusercontent.com/yishengjiang99/gbk/b43f004a7e95321d2decde2e604350b014dcd105/public/static/GeneralUser-GS.sf2
