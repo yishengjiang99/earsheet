@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       create_group:
-        description: Create internal group GROUP_NAME if missing and add the team users who can see this app as testers (create-only)
+        description: Create internal group GROUP_NAME if missing and add ONLY_EMAIL (if a team user who can see the app) as a tester (create-only)
         required: false
         type: boolean
         default: false
@@ -15,6 +15,11 @@ on:
         required: false
         type: string
         default: Internal
+      only_email:
+        description: Team user to add with create_group (other team users are never added)
+        required: false
+        type: string
+        default: yisheng.jiang@gmail.com
 
 jobs:
   assign:
@@ -28,6 +33,7 @@ jobs:
           BUILD_NUMBER: ${{ inputs.build_number }}
           CREATE_GROUP: ${{ inputs.create_group }}
           GROUP_NAME: ${{ inputs.group_name }}
+          ONLY_EMAIL: ${{ inputs.only_email || 'yisheng.jiang@gmail.com' }}
           BUNDLE_ID: com.ragnus.pnge
         run: |
           set -euo pipefail
@@ -116,6 +122,10 @@ jobs:
                 visible = any(x['id'] == app_id for x in va.get('data', []))
               print('user', a.get('firstName'), a.get('lastName'), email, 'roles', a.get('roles'), 'canSeeApp', bool(visible))
               if not visible or not email:
+                continue
+              # Only the owner is synced; never add the rest of the team (2026-10-03 cleanup).
+              only = (os.environ.get('ONLY_EMAIL') or 'yisheng.jiang@gmail.com').strip().lower()
+              if email.lower() != only:
                 continue
               if email.lower() in have:
                 print('  already a tester in', gname)
