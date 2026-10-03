@@ -22,9 +22,11 @@ public final class AudioRecorder {
     public init() {}
 
     public func start() throws {
+        #if os(iOS)
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
         try session.setActive(true, options: [])
+        #endif
 
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                    sampleRate: Self.targetSampleRate,
@@ -139,7 +141,7 @@ public enum AudioImport {
                                                            count: Int(dst.frameLength)))
             }
             if status == .endOfStream { break }
-            if status == .inputRanDry || status == .noDataNow { break }
+            if status == .inputRanDry { break }
         }
         return out
     }

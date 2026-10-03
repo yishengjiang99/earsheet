@@ -149,7 +149,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E80000000000000000000001 /* Build configuration list for PBXProject "EarSheet" */;
+			buildConfigurationList = E80000000000000000000009 /* Build configuration list for PBXProject "EarSheet" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -331,7 +331,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E80000000000000000000001 /* Build configuration list for PBXProject "EarSheet" */ = {
+		E80000000000000000000009 /* Build configuration list for PBXProject "EarSheet" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E80000000000000000000001 /* Debug */,

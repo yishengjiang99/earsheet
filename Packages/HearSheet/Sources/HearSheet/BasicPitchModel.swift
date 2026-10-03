@@ -89,7 +89,7 @@ public final class BasicPitchModel {
 
     // MARK: - Private
 
-    private func read2D(_ out: MLPredictionOutput, name: String, d1: Int, d2: Int) throws -> [[Float]] {
+    private func read2D(_ out: MLFeatureProvider, name: String, d1: Int, d2: Int) throws -> [[Float]] {
         guard let ma = out.featureValue(for: name)?.multiArrayValue,
               ma.shape.count == 3,
               ma.shape[0].intValue == 1, ma.shape[1].intValue == d1, ma.shape[2].intValue == d2,
