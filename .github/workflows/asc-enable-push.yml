@@ -68,7 +68,7 @@ jobs:
                   if b['attributes']['identifier'] == bundle and b['attributes']['platform'] in ('IOS', 'UNIVERSAL')]
           if not bids: sys.exit(f'bundle id {bundle} not found')
           bid = bids[0]['id']
-          caps = api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities?limit=200')['data']
+          caps = api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities')['data']
           names = sorted(c['attributes']['capabilityType'] for c in caps)
           print(f'bundle id resource {bid}; capabilities before: {names}')
           if 'PUSH_NOTIFICATIONS' in names:
@@ -127,7 +127,7 @@ jobs:
           print(f"team={e.get('com.apple.developer.team-identifier')} app-id={e.get('application-identifier')}")
           print(f"aps-environment={e.get('aps-environment')}")
           print(f"entitlement keys: {sorted(e)}")
-          caps = sorted(c['attributes']['capabilityType'] for c in api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities?limit=200')['data'])
+          caps = sorted(c['attributes']['capabilityType'] for c in api('GET', f'/v1/bundleIds/{bid}/bundleIdCapabilities')['data'])
           print(f'capabilities after: {caps}')
           if e.get('aps-environment') != 'production':
             sys.exit('new profile is missing aps-environment=production')
