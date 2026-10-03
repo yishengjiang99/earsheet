@@ -5,6 +5,7 @@
 #
 #   scripts/fetch-models            # download / verify everything in models.lock
 #   MODELS_DIR=/tmp/m scripts/fetch-models
+#   MODELS_ASSET_DIR=~/Downloads/model-latest scripts/fetch-models   # use pre-downloaded assets
 #
 # models.lock (repo root) has one entry per line, either a download pin:
 #   <sha256>  <name>  <url>
@@ -103,11 +104,18 @@ while read -r want name url extra || [ -n "${want:-}" ]; do
   fi
 
   asset="$TMP/$(basename "$url")"
+  # MODELS_ASSET_DIR: pre-downloaded assets by file name (e.g. from
+  # `gh release download` for a private repo's release). Still hash-checked.
+  if [ -n "${MODELS_ASSET_DIR:-}" ] && [ -f "$MODELS_ASSET_DIR/$(basename "$url")" ]; then
+    log "local  $MODELS_ASSET_DIR/$(basename "$url")"
+    cp -f "$MODELS_ASSET_DIR/$(basename "$url")" "$asset"
+  else
   log "fetch  $url"
   if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 -sS -o "$asset" "$url"; then
     log "FAIL   download failed: $url"
     failed=$((failed + 1))
     continue
+  fi
   fi
 
   have="$(sha256 "$asset")"
