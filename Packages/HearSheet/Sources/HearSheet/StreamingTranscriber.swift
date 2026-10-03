@@ -19,6 +19,7 @@ public final class StreamingTranscriber: @unchecked Sendable {
     private let model: BasicPitchModel
     /// The loaded model's own decoder thresholds.
     private let thresholds: BasicPitchDecoder.Thresholds
+    private let calibrator = VelocityCalibrator()
     private let lock = NSLock()
     private var padded: [Float] = []
     private var noteFrames: [[Float]] = []
@@ -123,18 +124,22 @@ public final class StreamingTranscriber: @unchecked Sendable {
     /// Decode notes from the frames collected so far (no end-trim).
     /// For the live preview; the trailing edge may shift as audio arrives.
     public func liveNotes() -> [NoteEvent] {
-        decode(frames: snapshot(trimmed: false))
+        let (frames, audio) = snapshotWithAudio(trimmed: false)
+        return decode(frames: frames, audio: audio)
     }
 
     /// Final notes with the batch path's end-trim applied.
     public func finalize() -> [NoteEvent] {
-        decode(frames: snapshot(trimmed: true))
+        let (frames, audio) = snapshotWithAudio(trimmed: true)
+        return decode(frames: frames, audio: audio)
     }
 
-    private func snapshot(trimmed: Bool) -> ([[Float]], [[Float]], [[Float]]) {
+    private func snapshotWithAudio(trimmed: Bool) -> (([[Float]], [[Float]], [[Float]]), [Float]) {
         lock.lock()
         var n = noteFrames, o = onsetFrames, c = contourFrames
         let count = audioSampleCount
+        // Copy audio without the front pad.
+        let audio = Array(padded[Transcriber.frontPadSamples..<(Transcriber.frontPadSamples + count)])
         lock.unlock()
         if trimmed {
             let keep = Int((Double(count) / Double(Transcriber.hopSamples))
@@ -145,18 +150,31 @@ public final class StreamingTranscriber: @unchecked Sendable {
                 c.removeLast(c.count - keep)
             }
         }
-        return (n, o, c)
+        return ((n, o, c), audio)
     }
 
-    private func decode(frames: ([[Float]], [[Float]], [[Float]])) -> [NoteEvent] {
+    private func decode(frames: ([[Float]], [[Float]], [[Float]]), audio: [Float]) -> [NoteEvent] {
         let raw = BasicPitchDecoder.decode(frames: frames.0, onset: frames.1, contour: frames.2,
                                            thresholds: thresholds)
+        let sampleRate = Float(HearSheet.sampleRate)
         return raw.map { r in
-            NoteEvent(
-                onset: BasicPitchDecoder.frameToTime(frame: r.startFrame),
-                offset: BasicPitchDecoder.frameToTime(frame: r.endFrame),
+            let onsetSec = BasicPitchDecoder.frameToTime(frame: r.startFrame)
+            let offsetSec = BasicPitchDecoder.frameToTime(frame: r.endFrame)
+            let fromSample = Int((onsetSec * Double(sampleRate)).rounded())
+            let toSample = Int((offsetSec * Double(sampleRate)).rounded())
+            let rms = VelocityCalibrator.rms(of: audio, from: fromSample, to: toSample)
+            let velocity: Int
+            if rms > 0 {
+                velocity = calibrator.velocity(for: r.midi, rms: rms)
+            } else {
+                velocity = min(127, max(1, Int((127 * r.amplitude).rounded())))
+            }
+            return NoteEvent(
+                onset: onsetSec,
+                offset: offsetSec,
                 midi: r.midi,
-                velocity: min(127, max(1, Int((127 * r.amplitude).rounded()))))
+                velocity: velocity)
         }.sorted { $0.onset < $1.onset }
     }
+
 }
