@@ -9,6 +9,8 @@ Sibling of [SheetCam](https://github.com/yishengjiang99/omr-sheet-cam). SheetCam
 
 On-device iOS 17+. Microphone or imported audio goes through a fine-tune of Spotify Basic Pitch (Core ML) and comes out as an engraved staff, SMF MIDI, and MusicXML. Playback uses the SF2 engine from SheetCam. No audio leaves the phone.
 
+Explainer video (about 90 s): [docs/explainer](docs/explainer/README.md)
+
 ## Layout
 
 - `EarSheet.xcodeproj` — app shell, scheme `EarSheet`, team `83D36RPMUM`
