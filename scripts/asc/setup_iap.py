@@ -157,11 +157,9 @@ for spec in SUBS:
                 continue
             api("POST", "/v1/subscriptionPrices", {"data": {"type": "subscriptionPrices", "attributes": {"preserveCurrentPrice": False},
                 "relationships": {"subscription": {"data": {"type": "subscriptions", "id": sid}},
-                                  "subscriptionPricePoint": {"data": {"type": "subscriptionPricePoints", "id": pt["id"]}},
-                                  "territory": {"data": {"type": "territories", "id": terr}}}}})
+                                  "subscriptionPricePoint": {"data": {"type": "subscriptionPricePoints", "id": pt["id"]}}}}})
             made += 1
         return f"USA ${spec['usd']}; {made} territory prices created, {len(have)} already set"
-    step(f"{spec['productId']} prices", sub_prices)
 
     def sub_avail():
         if api("GET", f"/v1/subscriptions/{sid}/subscriptionAvailability", ok404=True):
@@ -171,6 +169,8 @@ for spec in SUBS:
                               "availableTerritories": {"data": [{"type": "territories", "id": t} for t in territories]}}}})
         return f"{len(territories)} territories"
     step(f"{spec['productId']} availability", sub_avail)
+    # prices must come after availability (ASC rejects prices for territories the subscription is not available in)
+    step(f"{spec['productId']} prices", sub_prices)
 
     def trial():
         have = {o["relationships"]["territory"]["data"]["id"] for o in all_pages(f"/v1/subscriptions/{sid}/introductoryOffers?include=territory&limit=200")
