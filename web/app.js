@@ -46,7 +46,9 @@ function initEngine(pref, modelUrl) {
 // fine-tuned model: model-ft/earsheet-model.json then describes it (release tag,
 // sha256 pins, recommended decoder settings). Pick with ?model=stock|ft.
 const MODELS = {
-  stock: { id: 'stock', label: 'Stock: Basic Pitch ICASSP 2022', url: 'model/model.json', onset: 0.5, frame: 0.3, minMs: 128 },
+  // Decoder tuned on held-out real + synthetic audio (docs/finetune/EXPERIMENTS.md, E0t2):
+  // onset 0.7, frame 0.4, min note 5 frames (58 ms). Spotify's defaults are 0.5 / 0.3 / 128 ms.
+  stock: { id: 'stock', label: 'Stock: Basic Pitch ICASSP 2022', url: 'model/model.json', onset: 0.7, frame: 0.4, minMs: 58 },
 };
 async function discoverModels() {
   try {
@@ -518,7 +520,7 @@ async function wire() {
   const sel = $('model-select');
   sel.innerHTML = Object.values(MODELS).map((m) => `<option value="${m.id}">${m.label}</option>`).join('');
   sel.value = model.id;
-  sel.disabled = Object.keys(MODELS).length < 2;
+  sel.hidden = Object.keys(MODELS).length < 2; // only stock ships (no fine-tune beat it)
   sel.onchange = (e) => { const p = new URLSearchParams(location.search); p.set('model', e.target.value); location.search = p.toString(); };
   applyModelDefaults(model);
   initEngine(pref, model.url).then((m) => {

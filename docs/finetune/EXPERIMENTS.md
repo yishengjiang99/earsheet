@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Current status (2026-10-03 12:06 PT):** E7 eval (compare_models: e7 pw0.01 + probe pw0.03, tuned decoders): ft-e7-compare.log, training, epoch 0/?, 39 min since start. Last: n/a. Full history: Status log at the bottom (append-only).
+**Current status (2026-10-03 12:20 PT):** training concluded. Shipping **stock Basic Pitch weights + tuned decoder (onset 0.7, frame 0.4, min note 5 frames = 58 ms)**. Full history: Status log at the bottom (append-only).
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
@@ -48,6 +48,9 @@ Columns are onset-F1 on held-out sets. "mixed val" = synth val + GuitarSet val +
 | E5 probes | all data, lr 3e-5, 1 epoch x 300 steps, onset pos weight 0.1 / **0.03** / 0.3 | 0.747 / **0.813** / (running) | | | | | | | | pw 0.03 is the first setting to beat stock on mixed val (0.813 vs 0.804) |
 | E6 | all data, onset pos weight 0.03, lr 3e-5, 8-epoch cosine (stopped at 4, best = epoch 1) | 0.805 (ep1), 0.791, 0.791, 0.787 | 0.874 / tuned 0.904 | 0.857 / 0.909 | 0.676 / 0.731 | 0.785 / 0.832 | 0.703 / 0.720 | 0.727 / 0.761 | same as stock (742 KB tfjs) | Default decoder: better on SMD (+0.024), MAESTRO (+0.008), synth multi (+0.03); worse on GuitarSet (-0.017) and FluidR3 (-0.044). **With tuned decoders, stock still wins on all real sets**: stock tuned [0.7, 0.4, 5] gives GuitarSet 0.843, MAESTRO 0.735, SMD 0.762, while E6 tuned [0.6, 0.4, 7] gives 0.832 / 0.720 / 0.761. Not shipped. Release [model-ft-exp6](https://github.com/yishengjiang99/earsheet/releases/tag/model-ft-exp6) |
 | E0t2 | stock, decoder tuned on mixed val with the min_note_len grid: onset 0.7, frame 0.4, min note 5 frames (58 ms) | (tuning set) | 0.887 | 0.921 | 0.731 | **0.843** | **0.735** | **0.762** | 742 KB | the best real-audio numbers so far: +0.04 to +0.06 over Spotify defaults with no retraining |
+| E7 | all data, onset pos weight 0.01, lr 3e-5, 2-epoch cosine (best = epoch 1) | 0.817 / tuned 0.840 | 0.898 / 0.902 | 0.885 / 0.912 | 0.710 / 0.723 | 0.797 / 0.828 | 0.685 / 0.697 | 0.728 / 0.747 | same | tuned decoder [0.5, 0.4, 7]. Loses to tuned stock on all real sets |
+| E5 p0.03 | 1-epoch probe, pos weight 0.03 | 0.813 / tuned 0.843 | 0.881 / 0.903 | 0.873 / 0.917 | 0.677 / 0.728 | 0.794 / 0.836 | 0.701 / 0.707 | 0.728 / 0.753 | same | tuned [0.6, 0.4, 7]. Loses to tuned stock on all real sets |
+| E8 | real data only (GuitarSet + MAESTRO + SMD train), pos weight 0.01, 2 epochs | 0.806, 0.807 | | | | | | | | stopped before held-out eval (training concluded) |
 | E1 | original script defaults (2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes) | synth val only: 0.670 (best epoch 0.727) vs stock 0.879 | | | | | | | | precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept |
 
 ## Decoder finding (no training needed)
@@ -68,8 +71,9 @@ Weights live in GitHub releases, never in git. Each release has a SavedModel zip
 TF.js zip, a Core ML `BasicPitchPoly.mlpackage` zip, `SHA256SUMS`, and a
 `models.lock.snippet`. They are built by `tools/model-export/export-model.sh`.
 
-- **Latest: [model-latest](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest)**, currently the stock reference export (`model-ft-exp0`); no fine-tune has beaten stock yet
-- [model-ft-exp0](https://github.com/yishengjiang99/earsheet/releases/tag/model-ft-exp0): stock ICASSP 2022 through the export pipeline (recommended thresholds onset 0.7 / frame 0.3)
+- **Shipping: [model-latest](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest)**: stock ICASSP 2022 weights (= `model-ft-exp0`) + `decoder-thresholds.json` (onset 0.7, frame 0.4, min note 5 frames / 58 ms). No fine-tune beat it on real audio
+- [model-ft-exp6](https://github.com/yishengjiang99/earsheet/releases/tag/model-ft-exp6): E6 fine-tune (not shipped; kept for reference)
+- [model-ft-exp0](https://github.com/yishengjiang99/earsheet/releases/tag/model-ft-exp0): stock ICASSP 2022 through the export pipeline (first threshold recommendation onset 0.7 / frame 0.3, superseded by 0.7 / 0.4 / 5 frames)
 - iOS integration: [IOS_MODEL_HANDOFF.md](IOS_MODEL_HANDOFF.md)
 
 ## Plan
@@ -115,3 +119,4 @@ original wording.
 | 2026-10-03 11:56 | e6 | Status (auto): E6 final eval + E7 (onset pos weight 0.01, 2 epochs) in parallel: ft-e6.log, final evaluation, epoch 4/8, 29 min since start. Last: [val-f1] epoch 4: note F1 0.7865 P 0.744 R 0.858 (best 0.8052) | (auto) |
 | 2026-10-03 11:58 | E6 result | E6 (all data, onset pos weight 0.03, 8-epoch schedule) peaked at epoch 1 (mixed val 0.805, then 0.791 / 0.791 / 0.787) and stopped. Held-out at default decoder vs stock: SMD 0.727 vs 0.703, MAESTRO 0.703 vs 0.695, GuitarSet 0.785 vs 0.802, FluidR3 0.857 vs 0.901. With each model's tuned decoder, stock wins on real audio (stock [0.7/0.4/5]: GuitarSet 0.843, MAESTRO 0.735, SMD 0.762; E6: 0.832 / 0.720 / 0.761). Not shipped; published as release model-ft-exp6. E7 (pos weight 0.01, 2 epochs) reached mixed val 0.8166 at epoch 1 (P 0.801 R 0.854); full held-out comparison running. Export fix: fine-tuned graphs name the input input_1, so it is renamed to input_2 for Core ML | (this commit) |
 | 2026-10-03 12:06 | e7 | Status (auto): E7 eval (compare_models: e7 pw0.01 + probe pw0.03, tuned decoders): ft-e7-compare.log, training, epoch 0/?, 39 min since start. Last: n/a | (auto) |
+| 2026-10-03 12:20 | FINAL | **Training concluded (user decision). Shipping stock ICASSP 2022 weights with the tuned decoder: onset threshold 0.7, frame threshold 0.4, min note length 5 frames (58 ms)**, tuned on mixed val. Held-out onset F1, tuned stock vs Spotify defaults (0.5 / 0.3 / 11 frames): GuitarSet p05 **0.843** vs 0.802; MAESTRO test **0.735** vs 0.695; SMD test **0.762** vs 0.703; test-gugs **0.887** vs 0.861; test-fluidr3 **0.921** vs 0.901 (multi-instrument FluidR3 0.731 vs 0.646). No fine-tune beat tuned stock on real audio. Best decoder-tuned fine-tunes: E5 p0.03 (GuitarSet 0.836, MAESTRO 0.707, SMD 0.753) and E7 (0.828 / 0.697 / 0.747). E8 (real data only) stopped after 2 epochs (mixed val 0.807). Fine-tuned options removed from the web demo; model-latest points at stock + thresholds JSON | (this commit) |
