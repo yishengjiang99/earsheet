@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Status (2026-10-03 11:05 PT):** running E4b, training, epoch 2/8, 2 min elapsed, ETA ≤ ~17 min (early stop may end sooner). Last: [val-f1] epoch 1: note F1 0.3841 P 0.297 R 0.613 (best 0.8039)
+**Status (2026-10-03 11:15 PT):** running E4b, final evaluation on test sets, epoch 3/8, 13 min elapsed, ETA ≤ ~34 min (early stop may end sooner). Last: [val-f1] epoch 3: note F1 0.2623 P 0.186 R 0.530 (best 0.8039)
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
