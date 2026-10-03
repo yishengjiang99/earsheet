@@ -1,5 +1,9 @@
 # Basic Pitch fine-tune experiments
 
+<!-- status -->
+**Status (2026-10-03 10:45 PT):** running E2, training, epoch 0/8, 2 min elapsed. Last: n/a
+<!-- /status -->
+
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
 "not too big". That means the same architecture and I/O as stock Basic Pitch (ICASSP 2022,
 about 0.74 MB of TF.js weights), real time on WASM, and wins on **real** audio, not only
