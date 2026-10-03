@@ -3,10 +3,13 @@
 > **Shipping config (2026-10-03): stock ICASSP 2022 weights + tuned decoder thresholds.**
 > The weights are the stock model the app already bundles through `models.lock`
 > (Spotify's `nmp.mlpackage`), so nothing needs to be downloaded or re-pinned.
-> The thresholds are the defaults in `BasicPitchDecoder` on main:
-> **onset 0.7, frame 0.4, `minNoteLen` 5 frames (58 ms)**. Spotify's defaults were 0.5 / 0.3 / 11.
-> The same values are in the `decoder-thresholds.json` asset of release
-> [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest).
+> The tuned decoder settings are **onset 0.7, frame 0.4, min note length 5 frames (58 ms)**
+> (Spotify's defaults: 0.5 / 0.3 / 11). They ship as the thresholds sidecar
+> **`decoder-thresholds.json`** in release
+> [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest)
+> (keys `onset_threshold`, `frame_threshold`, `min_note_len_frames`). Adopting them in the app
+> (per-model decoder thresholds) is the job of the `agent/ios-thresholds` ticket. Until that
+> lands, `BasicPitchDecoder` on main still uses Spotify's defaults.
 > Held-out onset F1 vs Spotify defaults: GuitarSet 0.843 vs 0.802, MAESTRO 0.735 vs 0.695,
 > SMD 0.762 vs 0.703. No fine-tune beat this on real audio (EXPERIMENTS.md). The rest of
 > this doc covers swapping in a different checkpoint later.
@@ -119,9 +122,9 @@ The decoder is `BasicPitchDecoder.decode(frames:onset:contour:thresholds:)` (a p
 `note_creation.model_output_to_notes`: infer_onsets, melodia trick, min note length 11
 frames, energy tolerance 11).
 
-**Thresholds (shipping):** onset **0.7**, frame **0.4**, min note **5 frames**. These are the
-defaults in `BasicPitchDecoder.Thresholds()` and `BasicPitchDecoder.minNoteLen` on main.
-They were tuned for the stock weights by grid search (onset 0.3-0.8 x frame 0.2-0.5 x
+**Thresholds (shipping):** onset **0.7**, frame **0.4**, min note **5 frames**. They are published
+in `decoder-thresholds.json` (release `model-latest`). The app adopts them on branch
+`agent/ios-thresholds` (main's `BasicPitchDecoder` still has 0.5 / 0.3 / 11). They were tuned for the stock weights by grid search (onset 0.3-0.8 x frame 0.2-0.5 x
 min note {5, 7, 11}) on the mixed validation set, then checked on the held-out tests:
 
 | set | tuned 0.7 / 0.4 / 5 | Spotify 0.5 / 0.3 / 11 |
@@ -133,7 +136,8 @@ min note {5, 7, 11}) on the mixed validation set, then checked on the held-out t
 
 A different checkpoint needs its own tuned values (they ship in each release's notes /
 `metrics.json`). Pass them with `BasicPitchDecoder.Thresholds(onset:frame:)` from the
-`Transcriber` call site. `minNoteLen` is a static constant today, so change it there.
+`Transcriber` call site. On main `minNoteLen` is a static constant, so a per-model value needs
+a parameter (that is part of the `agent/ios-thresholds` ticket).
 The web demo uses the same values (min note 58 ms = 5 frames).
 
 ## 7. Where it plugs in

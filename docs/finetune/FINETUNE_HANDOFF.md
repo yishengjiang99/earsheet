@@ -158,7 +158,7 @@ Onset F1 on held-out sets at Spotify defaults, with each model's own tuned decod
 ## 3. Shipping config and how to reproduce
 
 - **Weights:** stock ICASSP 2022 (iOS already pins Spotify's `nmp.mlpackage` in `models.lock`; web pins `@spotify/basic-pitch@1.0.1`).
-- **Decoder:** onset **0.7**, frame **0.4**, min note **5 frames (58 ms)**, as defaults in `BasicPitchDecoder` (iOS) and `web/app.js` / `index.html` (web).
+- **Decoder:** onset **0.7**, frame **0.4**, min note **5 frames (58 ms)**. These are the defaults in the web demo (`web/app.js` / `index.html`) and in the `decoder-thresholds.json` sidecar of `model-latest`. iOS adoption is on the `agent/ios-thresholds` ticket (main's `BasicPitchDecoder` still uses Spotify's 0.5 / 0.3 / 11).
 - **Release:** [`model-latest`](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest), with `decoder-thresholds.json` and checksums.
 
 Reproduce the numbers:
