@@ -1,26 +1,40 @@
 #!/usr/bin/env python3
-"""Fine-tune Basic Pitch on this Mac, then write a Core ML bundle the iOS app can fetch.
+"""Fine-tune Basic Pitch (macOS or Linux), then write a Core ML bundle the iOS app can fetch (macOS).
 
 The upstream trainer (basic_pitch/train.py) always builds a fresh model. This script
 loads the ICASSP 2022 weights, fits on paired wav+midi, evaluates against the frozen
 checkpoint (and the real phone-mic gate when provided), and exports
 BasicPitchPoly.mlpackage only if the prompt's ship rule passes.
 
+The architecture and I/O are unchanged (input [1, 43844, 1] at 22050 Hz; note/onset
+[172, 88], contour [172, 264]), so the iOS decoder and the web demo work as-is.
+
 It does not commit weights. It writes:
-  build/finetune/<stamp>/{train,val}.tfrecord   serialized pairs (source=synthetic_sf2)
+  build/finetune/<stamp>/{train,val}.tfrecord   serialized pairs
   build/finetune/<stamp>/model.best             fine-tuned SavedModel
-  build/finetune/metrics.json                   both eval tables + the ship decision
-  build/BasicPitchPoly.mlpackage                exported Core ML package (on ship)
+  build/finetune/<stamp>/metrics.json           eval tables, tuned thresholds, ship decision
+  build/finetune/metrics.json                   copy of the latest run's metrics
+  build/BasicPitchPoly.mlpackage                exported Core ML package (on ship, macOS)
 
 Usage:
   scripts/finetune-basic-pitch --smoke
-  scripts/finetune-basic-pitch --pairs ~/earsheet-data/train --val ~/earsheet-data/val \\
-      [--mic-gate ~/earsheet-data/mic] [--epochs 8] [--lr 1e-4]
+  scripts/finetune-basic-pitch --pairs ~/earsheet-data/train [more dirs...] --val ~/earsheet-data/val \\
+      [--test ~/earsheet-data/real-test ...] [--mic-gate ~/earsheet-data/mic] \\
+      [--lr 1e-4] [--max-epochs 12] [--augment] [--freeze-bn] [--tune-thresholds]
+  scripts/finetune-basic-pitch --eval-only --savedmodel DIR --val DIR --out out.json \\
+      [--onset-threshold 0.5 --frame-threshold 0.3]
+
+Training defaults (changed after experiments on synthetic + real audio, see
+docs/finetune.md): plain BCE onset loss (the old weighted loss with positive weight
+0.95 roughly doubled false onsets), BatchNorm frozen in inference mode, one stage
+with linear warmup + cosine decay, fresh random windows every epoch, and early
+stopping on held-out note F1 that starts from the stock model's score, so a run that
+never beats stock keeps stock.
 
 Pairs are basename.wav + basename.mid. WAVs must be 22050 Hz mono 16-bit PCM
-(basic_pitch 0.4.0 asserts AUDIO_N_CHANNELS == 1 at serialization; the prompt's
-"stereo" wording does not match the code, so mono is required and documented here).
-MIDI is parsed with pretty_midi (a basic-pitch dependency).
+(basic_pitch 0.4.0 asserts AUDIO_N_CHANNELS == 1 at serialization). MIDI is parsed
+with pretty_midi. Environment: Python 3.10/3.11 with TF 2.15 / Keras 2, e.g.
+  pip install 'basic-pitch[tf]==0.4.0' sox 'setuptools<81'   (+ coremltools on the Mac)
 """
 from __future__ import annotations
 
@@ -28,9 +42,11 @@ import argparse
 import json
 import os
 import platform
+import random
 import shutil
 import subprocess
 import sys
+import time
 import wave
 from pathlib import Path
 
@@ -41,26 +57,48 @@ SOURCE_TAG = "synthetic_sf2"
 EXPECTED_IN = (1, 43844, 1)
 EXPECTED_OUT = {"note": 88, "onset": 88, "contour": 264}
 ONSET_TOLERANCE = 0.05  # 50 ms, per the prompt
+DEFAULT_ONSET_T = 0.5
+DEFAULT_FRAME_T = 0.3
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
 
 
 # ---------------------------------------------------------------- smoke
 
 def smoke() -> int:
-    print(f"machine {platform.platform()} {platform.machine()}")
-    print(f"python {sys.version.split()[0]}")
+    log(f"machine {platform.platform()} {platform.machine()}")
+    log(f"python {sys.version.split()[0]}")
     missing = []
-    for mod in ("tensorflow", "basic_pitch", "coremltools"):
+    # sox: imported by basic_pitch.data.tf_example_serialization (the "data" extra).
+    for mod in ("tensorflow", "basic_pitch", "mir_eval", "pretty_midi", "sox"):
         try:
             __import__(mod)
-            print(f"ok {mod}")
+            log(f"ok {mod}")
         except Exception as exc:  # noqa: BLE001
             missing.append(mod)
-            print(f"missing {mod}: {exc}")
+            log(f"missing {mod}: {exc}")
+    # coremltools is only needed for the Core ML export, which needs macOS anyway.
+    # Training and evaluation run anywhere TensorFlow does (Linux CPU included).
+    try:
+        __import__("coremltools")
+        log("ok coremltools")
+    except Exception as exc:  # noqa: BLE001
+        log(f"note: coremltools unavailable ({exc}); training/eval OK, Core ML export disabled")
+    if not missing:
+        try:  # resampy (via basic_pitch.inference) still imports pkg_resources (setuptools<81)
+            __import__("basic_pitch.inference")
+            log("ok basic_pitch.inference")
+        except Exception as exc:  # noqa: BLE001
+            missing.append("basic_pitch.inference")
+            log(f"missing basic_pitch.inference: {exc} (pip install 'setuptools<81')")
     if missing:
-        print("install: python3 -m venv .venv && source .venv/bin/activate && pip install 'basic-pitch[tf]' coremltools")
+        log("install (Python 3.10/3.11, TF 2.15 / Keras 2): python3 -m venv .venv && "
+            "source .venv/bin/activate && pip install 'basic-pitch[tf]==0.4.0' sox 'setuptools<81' coremltools")
         return 1
     from basic_pitch import ICASSP_2022_MODEL_PATH
-    print(f"icassp {ICASSP_2022_MODEL_PATH} exists={Path(ICASSP_2022_MODEL_PATH).exists()}")
+    log(f"icassp {ICASSP_2022_MODEL_PATH} exists={Path(ICASSP_2022_MODEL_PATH).exists()}")
     return 0
 
 
@@ -72,6 +110,13 @@ def read_pairs(pairs_dir: Path):
     mids = {p.stem: p for p in pairs_dir.glob("*.mid")}
     for stem in sorted(set(wavs) & set(mids)):
         yield stem, wavs[stem], mids[stem]
+
+
+def read_many(dirs) -> list:
+    out = []
+    for d in dirs or []:
+        out.extend(read_pairs(d))
+    return out
 
 
 def wav_seconds(wav_path: Path) -> float:
@@ -109,7 +154,6 @@ def serialize_split(stems_and_paths, tfrecord_path: Path) -> list[str]:
     import numpy as np
     from basic_pitch.constants import (
         ANNOTATION_HOP,
-        AUDIO_SAMPLE_RATE,
         FREQ_BINS_CONTOURS,
         N_FREQ_BINS_CONTOURS,
         N_FREQ_BINS_NOTES,
@@ -121,9 +165,12 @@ def serialize_split(stems_and_paths, tfrecord_path: Path) -> list[str]:
     with tf_record_writer(tfrecord_path) as writer:
         for stem, wav_path, mid_path in stems_and_paths:
             duration = wav_seconds(wav_path)  # validates format too
+            if duration < 2.1:
+                log(f"  skip {stem}: shorter than one model window")
+                continue
             notes = midi_notes(mid_path)
             if not notes:
-                print(f"  skip {stem}: no notes in {mid_path.name}")
+                log(f"  skip {stem}: no notes in {mid_path.name}")
                 continue
             time_scale = np.arange(0, duration + ANNOTATION_HOP, ANNOTATION_HOP)
             n_frames = len(time_scale)
@@ -132,7 +179,7 @@ def serialize_split(stems_and_paths, tfrecord_path: Path) -> list[str]:
             on_idx, on_val = [], []
             con_idx, con_val = [], []
             for start, end, pitch, _vel in notes:
-                if not 21 <= pitch <= 108:
+                if not 21 <= pitch <= 108 or start >= duration:
                     continue
                 f = pitch - 21
                 s = int(np.clip(round(start / ANNOTATION_HOP), 0, n_frames - 1))
@@ -149,21 +196,13 @@ def serialize_split(stems_and_paths, tfrecord_path: Path) -> list[str]:
                 on_val.append(1.0)
 
             ex = _to_transcription_tfex(
-                stem,
-                SOURCE_TAG,
-                open(wav_path, "rb").read(),
-                note_idx,
-                note_val,
-                on_idx,
-                on_val,
-                con_idx,
-                con_val,
-                (n_frames, N_FREQ_BINS_NOTES),
-                (n_frames, N_FREQ_BINS_CONTOURS),
+                stem, SOURCE_TAG, open(wav_path, "rb").read(),
+                note_idx, note_val, on_idx, on_val, con_idx, con_val,
+                (n_frames, N_FREQ_BINS_NOTES), (n_frames, N_FREQ_BINS_CONTOURS),
             )
             writer.write(ex.SerializeToString())
             stems.append(stem)
-    print(f"  wrote {tfrecord_path} ({len(stems)} pairs)")
+    log(f"  wrote {tfrecord_path} ({len(stems)} pairs)")
     return stems
 
 
@@ -174,20 +213,86 @@ def tf_record_writer(path: Path):
     return tf.io.TFRecordWriter(str(path))
 
 
+# --------------------------------------------------------- augmentation
+
+def make_augmenter(seed: int | None = None):
+    """Waveform augmentation for one AUDIO_N_SAMPLES window (tf ops, runs in tf.data):
+    random gain, random EQ (tilt + one bell), synthetic room reverb, coloured noise.
+    Mirrors what a phone mic in a room does to a clean render. Labels are unchanged."""
+    import numpy as np
+    import tensorflow as tf
+    from basic_pitch.constants import AUDIO_N_SAMPLES, AUDIO_SAMPLE_RATE
+
+    n = AUDIO_N_SAMPLES
+    nfft = 1 << int(np.ceil(np.log2(n + 8192)))
+    freqs = tf.constant(np.fft.rfftfreq(nfft, 1.0 / AUDIO_SAMPLE_RATE).astype(np.float32))
+    logf = tf.math.log(tf.maximum(freqs, 20.0) / 1000.0) / np.log(2.0)  # octaves re 1 kHz
+    ir_len = 8192
+    t_ir = tf.range(ir_len, dtype=tf.float32) / AUDIO_SAMPLE_RATE
+    u = lambda lo, hi: tf.random.uniform((), lo, hi)  # noqa: E731
+
+    def augment(audio, targets):
+        x = audio[:, 0]
+        # EQ: spectral tilt (+-3 dB/oct) and one bell (+-9 dB, 0.7-3 oct wide), p=0.6
+        tilt = tf.where(u(0., 1.) < 0.6, u(-3.0, 3.0), 0.0)
+        bell_c, bell_w = u(-2.5, 3.0), u(0.7, 3.0)
+        bell_g = tf.where(u(0., 1.) < 0.6, u(-9.0, 9.0), 0.0)
+        gain_db = tilt * logf + bell_g * tf.exp(-0.5 * tf.square((logf - bell_c) / (bell_w / 2.355)))
+        H = tf.complex(tf.pow(10.0, gain_db / 20.0), 0.0)
+        X = tf.signal.rfft(tf.pad(x, [[0, nfft - n]]))
+        # Reverb: exponentially decaying noise IR, RT60 0.15-1.0 s, p=0.35
+        rt60 = u(0.15, 1.0)
+        ir = tf.random.normal([ir_len]) * tf.exp(-6.9 * t_ir / rt60)
+        ir = ir / (tf.norm(ir) + 1e-6) * u(0.1, 0.6)
+        ir = tf.tensor_scatter_nd_update(ir, [[0]], [1.0])
+        Hr = tf.signal.rfft(tf.pad(ir, [[0, nfft - ir_len]]))
+        X = X * H
+        X = tf.cond(u(0., 1.) < 0.35, lambda: X * Hr, lambda: X)
+        y = tf.signal.irfft(X)[:n]
+        # Noise: white..pink at 10-40 dB SNR, p=0.5
+        rms = tf.sqrt(tf.reduce_mean(tf.square(y)) + 1e-9)
+        noise = tf.random.normal([nfft])
+        shape = tf.pow(tf.maximum(freqs, 20.0) / 20.0, -u(0.0, 0.5))
+        noise = tf.signal.irfft(tf.signal.rfft(noise) * tf.complex(shape, 0.0))[:n]
+        noise = noise / (tf.sqrt(tf.reduce_mean(tf.square(noise))) + 1e-9)
+        snr = u(10.0, 40.0)
+        y = tf.cond(u(0., 1.) < 0.5, lambda: y + noise * rms / tf.pow(10.0, snr / 20.0), lambda: y)
+        # Gain: -18..+3 dB, then clip like an ADC
+        y = y * tf.pow(10.0, u(-18.0, 3.0) / 20.0)
+        y = tf.clip_by_value(y, -1.0, 1.0)
+        return tf.ensure_shape(y[:, None], audio.shape), targets
+
+    return augment
+
+
 # ------------------------------------------------------------- datasets
 
-def make_dataset(tfrecord_path: Path, n_windows_per_track: int, batch: int, training: bool):
+def make_dataset(tfrecord_path: Path, n_windows_per_track: int, batch: int, training: bool,
+                 augment: bool = False):
     import tensorflow as tf
     from basic_pitch.data import tf_example_deserialization as deser
 
     def file_gen():
         yield str(tfrecord_path)
 
+    # random_seed=True seeds each window draw with its index, i.e. the same windows on
+    # every pass. Training wants fresh random windows each epoch; validation wants a
+    # fixed set so epoch-to-epoch val loss is comparable.
     ds = deser.transcription_dataset(
-        file_gen, n_samples_per_track=n_windows_per_track, random_seed=training
+        file_gen, n_samples_per_track=n_windows_per_track, random_seed=not training
     )
+    # The dataset yields (audio, targets, per-head sample weights). basic_pitch's losses
+    # reduce to a scalar, so Keras 2.15 cannot apply per-example weights ("Can not
+    # squeeze dim[0]"). Our pairs always label all three heads (weights are all 1),
+    # so drop them.
+    ds = ds.map(lambda x, y, _w: (x, y))
     if training:
-        ds = ds.shuffle(512)
+        ds = ds.shuffle(2048)
+        if augment:
+            ds = ds.map(make_augmenter(), num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.repeat()
+    else:
+        ds = ds.cache()
     ds = ds.batch(batch).prefetch(tf.data.AUTOTUNE)
     return ds
 
@@ -203,21 +308,47 @@ def load_pretrained(model):
     if (path / "saved_model.pb").exists() or (path / "keras_metadata.pb").exists():
         loaded = tf.keras.models.load_model(path, compile=False)
         model.set_weights(loaded.get_weights())
-        print(f"loaded weights from {path}")
+        log(f"loaded weights from {path}")
         return model
     raise SystemExit(f"ICASSP weights not a Keras model at {path}; refuse to train from scratch")
 
 
-def set_harmonic_stacking_trainable(model, trainable: bool) -> None:
-    """HarmonicStacking is constructed trainable=False with no weights, so
-    freezing/unfreezing is a no-op by construction; log it instead of failing."""
+def freeze_batchnorm(model) -> int:
+    """BatchNorm layers trainable=False => Keras 2 runs them in inference mode with the
+    stock moving statistics. Fine-tuning batches of 8 windows otherwise drag the
+    statistics toward the new data and hurt everything else."""
     import tensorflow as tf
 
-    found = [l for l in model.layers if "harmonic_stacking" in l.name]
-    for l in found:
-        l.trainable = trainable
-    print(f"harmonic_stacking layers: {[l.name for l in found]} "
-          f"(trainable={trainable}; layer holds no weights)")
+    n = 0
+    for layer in model.layers:
+        if isinstance(layer, tf.keras.layers.BatchNormalization):
+            layer.trainable = False
+            n += 1
+    log(f"froze {n} BatchNormalization layers")
+    return n
+
+
+class WarmupCosine:
+    """Linear warmup to peak, cosine decay to floor (as a Keras LR schedule)."""
+
+    def __new__(cls, peak: float, warmup: int, total: int, floor_ratio: float = 0.05):
+        import math
+        import tensorflow as tf
+
+        class _S(tf.keras.optimizers.schedules.LearningRateSchedule):
+            def __call__(self, step):
+                step = tf.cast(step, tf.float32)
+                w = tf.cast(max(1, warmup), tf.float32)
+                tot = tf.cast(max(total, warmup + 1), tf.float32)
+                warm = peak * step / w
+                prog = tf.clip_by_value((step - w) / (tot - w), 0.0, 1.0)
+                cos = floor_ratio * peak + (1 - floor_ratio) * peak * 0.5 * (1 + tf.cos(math.pi * prog))
+                return tf.where(step < w, warm, cos)
+
+            def get_config(self):
+                return {"peak": peak, "warmup": warmup, "total": total}
+
+        return _S()
 
 
 # ------------------------------------------------------------------ eval
@@ -227,7 +358,7 @@ def reference_notes(mid_path: Path):
     import numpy as np
 
     notes = midi_notes(mid_path)
-    intervals = np.array([[s, e] for s, e, _, _ in notes])
+    intervals = np.array([[s, e] for s, e, _, _ in notes]).reshape(-1, 2)
     pitches = np.array([float(midi_to_hz(p)) for _, _, p, _ in notes])
     return intervals, pitches
 
@@ -236,79 +367,127 @@ def midi_to_hz(midi: int) -> float:
     return 440.0 * (2.0 ** ((midi - 69) / 12.0))
 
 
-def predict_notes(model_or_path, wav_path: Path):
+def predict_notes(model_or_path, wav_path: Path, onset_t: float = DEFAULT_ONSET_T,
+                  frame_t: float = DEFAULT_FRAME_T):
     """Note events via basic_pitch's own inference + decoder."""
     from basic_pitch import inference
 
-    _out, _midi_data, note_events = inference.predict(str(wav_path), model_or_path)
+    _out, _midi_data, note_events = inference.predict(
+        str(wav_path), model_or_path, onset_threshold=onset_t, frame_threshold=frame_t)
     return note_events  # [(start, end, pitch, amplitude, bends|None)]
 
 
-def note_f1(ref_intervals, ref_pitches, est_events) -> float:
+def model_outputs(model, pairs) -> dict:
+    """Raw model output per clip (so threshold sweeps don't re-run the model)."""
+    from basic_pitch import inference
+
+    return {stem: inference.run_inference(str(wav), model) for stem, wav, _ in pairs}
+
+
+def decode(output, onset_t: float, frame_t: float):
+    from basic_pitch import note_creation as infer
+
+    _midi, events = infer.model_output_to_notes(
+        output, onset_thresh=onset_t, frame_thresh=frame_t, infer_onsets=True,
+        min_note_len=11, include_pitch_bends=False, melodia_trick=True)
+    return events
+
+
+def note_scores(ref_intervals, ref_pitches, est_events) -> dict:
+    """mir_eval note scores: onset-only (50 ms) P/R/F1, plus F1 with offsets (20%/50 ms)."""
     import numpy as np
     import mir_eval
 
     if not len(est_events):
-        return 0.0
-    est_intervals = np.array([[s, e] for s, e, _, _, _ in est_events])
-    est_pitches = np.array([midi_to_hz(int(p)) for _, _, p, _, _ in est_events])
-    _p, _r, f = mir_eval.transcription.precision_recall_f1_overlap(
-        ref_intervals,
-        ref_pitches,
-        est_intervals,
-        est_pitches,
+        return {"p": 0.0, "r": 0.0, "f1": 0.0, "f1_offset": 0.0}
+    est_intervals = np.array([[e[0], e[1]] for e in est_events])
+    est_pitches = np.array([midi_to_hz(int(e[2])) for e in est_events])
+    # precision_recall_f1_overlap returns (precision, recall, f1, avg_overlap_ratio).
+    p, r, f, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_intervals, ref_pitches, est_intervals, est_pitches,
         onset_tolerance=ONSET_TOLERANCE,
         offset_ratio=None,  # onset-only note F1 per the prompt's 50 ms rule
     )
-    return float(f)
+    _p2, _r2, f_off, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_intervals, ref_pitches, est_intervals, est_pitches, onset_tolerance=ONSET_TOLERANCE)
+    return {"p": float(p), "r": float(r), "f1": float(f), "f1_offset": float(f_off)}
 
 
-def evaluate_model(model_or_path, pairs) -> dict:
-    """Per-clip note F1 plus the mean, for (stem, wav, mid) pairs."""
-    f1s = {}
-    for stem, wav_path, mid_path in pairs:
+def note_f1(ref_intervals, ref_pitches, est_events) -> float:
+    return note_scores(ref_intervals, ref_pitches, est_events)["f1"]
+
+
+def score_outputs(outputs: dict, pairs, onset_t: float, frame_t: float) -> dict:
+    f1s, rows = {}, []
+    for stem, _wav, mid_path in pairs:
         ref_i, ref_p = reference_notes(mid_path)
-        if len(ref_i) == 0:
+        if len(ref_i) == 0 or stem not in outputs:
             continue
-        est = predict_notes(model_or_path, wav_path)
-        f1s[stem] = round(note_f1(ref_i, ref_p, est), 4)
-    mean = round(sum(f1s.values()) / len(f1s), 4) if f1s else 0.0
-    return {"mean_f1": mean, "clips": f1s, "n_clips": len(f1s)}
+        sc = note_scores(ref_i, ref_p, decode(outputs[stem], onset_t, frame_t))
+        f1s[stem] = round(sc["f1"], 4)
+        rows.append(sc)
+    mean = lambda k: round(sum(r[k] for r in rows) / len(rows), 4) if rows else 0.0  # noqa: E731
+    return {"mean_f1": mean("f1"), "mean_precision": mean("p"), "mean_recall": mean("r"),
+            "mean_f1_with_offset": mean("f1_offset"), "onset_threshold": onset_t,
+            "frame_threshold": frame_t, "clips": f1s, "n_clips": len(f1s)}
+
+
+def evaluate_model(model_or_path, pairs, onset_t: float = DEFAULT_ONSET_T,
+                   frame_t: float = DEFAULT_FRAME_T, outputs: dict | None = None) -> dict:
+    """Per-clip note F1 plus the means, for (stem, wav, mid) pairs."""
+    if outputs is None:
+        outputs = model_outputs(model_or_path, pairs)
+    return score_outputs(outputs, pairs, onset_t, frame_t)
+
+
+ONSET_GRID = (0.3, 0.4, 0.5, 0.6, 0.7)
+FRAME_GRID = (0.2, 0.3, 0.4, 0.5)
+
+
+def tune_thresholds(outputs: dict, pairs) -> tuple[float, float, float]:
+    """Grid-search decoder thresholds for mean note F1 on these pairs."""
+    best = (DEFAULT_ONSET_T, DEFAULT_FRAME_T, -1.0)
+    for o in ONSET_GRID:
+        for fr in FRAME_GRID:
+            f1 = score_outputs(outputs, pairs, o, fr)["mean_f1"]
+            if f1 > best[2]:
+                best = (o, fr, f1)
+    return best
 
 
 class NoteF1EarlyStopping:
-    """Stop when val note-F1 (mir_eval, 50 ms) stops improving. Keeps the
-    weights from the best-F1 epoch. Evaluation runs in a subprocess so the
-    training session is never disturbed."""
+    """Stop when val note-F1 (mir_eval, 50 ms) stops improving. Starts from the stock
+    model's val F1, so weights are only kept if they beat stock. Evaluation runs in a
+    subprocess so the training session is never disturbed."""
 
-    def __init__(self, keras_model, val_dir: Path, best_weights_path: Path,
-                 eval_json: Path, patience: int, eval_every: int = 1):
+    def __init__(self, keras_model, val_dirs, best_weights_path: Path,
+                 eval_json: Path, patience: int, baseline: float = -1.0):
         self.keras_model = keras_model
-        self.val_dir = val_dir
+        self.val_dirs = val_dirs
         self.best_weights_path = best_weights_path
         self.eval_json = eval_json
         self.patience = patience
-        self.eval_every = eval_every
-        self.best = -1.0
+        self.best = baseline
         self.bad = 0
         self.best_epoch = 0
         self.stopped_epoch = None
+        self.history = []
 
     def on_epoch_end(self, epoch: int, saved_model_dir: Path) -> bool:
-        if (epoch + 1) % self.eval_every != 0:
-            return False
         self.keras_model.save(str(saved_model_dir))
-        r = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "--eval-only",
-             "--savedmodel", str(saved_model_dir),
-             "--val", str(self.val_dir),
-             "--out", str(self.eval_json)],
-            capture_output=True, text=True)
+        cmd = [sys.executable, str(Path(__file__).resolve()), "--eval-only",
+               "--savedmodel", str(saved_model_dir), "--out", str(self.eval_json), "--val"]
+        cmd += [str(d) for d in self.val_dirs]
+        r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"  [val-f1] eval subprocess failed:\n{r.stderr[-2000:]}")
-            return False
-        f1 = json.loads(self.eval_json.read_text())["mean_f1"]
-        print(f"  [val-f1] epoch {epoch + 1}: note F1 {f1:.4f} (best {self.best:.4f})")
+            log(f"  [val-f1] eval subprocess failed:\n{r.stderr[-2000:]}")
+            self.bad += 1
+            return self.bad >= self.patience
+        table = json.loads(self.eval_json.read_text())
+        f1 = table["mean_f1"]
+        self.history.append({"epoch": epoch + 1, **{k: v for k, v in table.items() if k != "clips"}})
+        log(f"  [val-f1] epoch {epoch + 1}: note F1 {f1:.4f} P {table['mean_precision']:.3f} "
+            f"R {table['mean_recall']:.3f} (best {self.best:.4f})")
         if f1 > self.best + 1e-4:
             self.best = f1
             self.bad = 0
@@ -419,50 +598,79 @@ def export_coreml(keras_model, dest: Path, val_pairs, tf_savedmodel_dir: Path) -
 # ------------------------------------------------------------------ main
 
 def eval_only(args) -> int:
-    """Subprocess entry: note-F1 of a SavedModel dir on --val pairs -> --out JSON."""
+    """Subprocess/CLI entry: note-F1 of a SavedModel dir on --val pairs -> --out JSON."""
     if not args.savedmodel or not args.val or not args.out:
         raise SystemExit("--eval-only needs --savedmodel, --val and --out")
-    if smoke() != 0:
-        return 1
     from basic_pitch import inference
 
-    pairs = list(read_pairs(args.val))
+    pairs = read_many(args.val)
     if not pairs:
         raise SystemExit(f"no wav+mid pairs in {args.val}")
-    table = evaluate_model(inference.Model(str(args.savedmodel)), pairs)
+    model = inference.Model(str(args.savedmodel))
+    outputs = model_outputs(model, pairs)
+    table = score_outputs(outputs, pairs, args.onset_threshold, args.frame_threshold)
+    if args.tune_thresholds:
+        o, fr, f1 = tune_thresholds(outputs, pairs)
+        table["tuned"] = {k: v for k, v in score_outputs(outputs, pairs, o, fr).items() if k != "clips"}
     args.out.write_text(json.dumps(table, indent=2))
-    print(json.dumps({"mean_f1": table["mean_f1"], "n_clips": table["n_clips"]}))
+    log(json.dumps({k: v for k, v in table.items() if k != "clips"}))
     return 0
+
+
+def summarize(t: dict) -> dict:
+    return {k: v for k, v in t.items() if k != "clips"} if t else t
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fine-tune Basic Pitch and export Core ML")
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--pairs", type=Path, help="Directory of basename.wav + basename.mid (train)")
-    parser.add_argument("--val", type=Path, help="Validation pairs (wav+mid)")
+    parser.add_argument("--pairs", type=Path, nargs="+",
+                        help="Training dirs of basename.wav + basename.mid (mixed, shuffled)")
+    parser.add_argument("--val", type=Path, nargs="+", help="Validation pair dirs (early stopping + gate)")
+    parser.add_argument("--test", type=Path, nargs="*", default=[],
+                        help="Extra held-out pair dirs, reported (stock vs tuned) but not used to select")
     parser.add_argument("--mic-gate", type=Path, default=None,
                         help="Real phone-mic gate: wav+mid pairs never trained on (>=30 clips to ship)")
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--epochs", type=int, default=8, help="(legacy, unused: see --max-epochs)")
+    parser.add_argument("--lr", type=float, default=1e-4, help="peak learning rate")
+    parser.add_argument("--warmup-steps", type=int, default=200)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--windows-per-track", type=int, default=8,
-                        help="Random AUDIO_N_SAMPLES windows sampled per track per epoch")
-    parser.add_argument("--patience", type=int, default=8)
-    parser.add_argument("--max-epochs", type=int, default=40)
-    # Internal: evaluate a SavedModel dir on --val pairs, write F1 JSON to --out.
+                        help="Random AUDIO_N_SAMPLES windows sampled per track per pass")
+    parser.add_argument("--steps-per-epoch", type=int, default=0,
+                        help="Training steps per epoch (0 = one pass over the tracks)")
+    parser.add_argument("--patience", type=int, default=4)
+    parser.add_argument("--max-epochs", type=int, default=12)
+    parser.add_argument("--onset-loss", choices=("plain", "weighted"), default="plain",
+                        help="plain BCE (default) or basic_pitch's weighted onset BCE")
+    parser.add_argument("--positive-weight", type=float, default=0.95, help="for --onset-loss weighted")
+    parser.add_argument("--label-smoothing", type=float, default=0.2)
+    parser.add_argument("--freeze-bn", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=True,
+                        help="gain/EQ/reverb/noise augmentation of training windows")
+    parser.add_argument("--tune-thresholds", action=argparse.BooleanOptionalAction, default=True,
+                        help="grid-search onset/frame thresholds on --val for both models")
+    parser.add_argument("--seed", type=int, default=1234)
+    # Internal / eval: evaluate a SavedModel dir on --val pairs, write F1 JSON to --out.
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--savedmodel", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--onset-threshold", type=float, default=DEFAULT_ONSET_T)
+    parser.add_argument("--frame-threshold", type=float, default=DEFAULT_FRAME_T)
     args = parser.parse_args()
 
     if args.eval_only:
+        if args.tune_thresholds and "--tune-thresholds" not in sys.argv:
+            args.tune_thresholds = False  # opt-in for eval-only
         return eval_only(args)
 
     if args.smoke or not args.pairs:
         return smoke()
-    for d, label in ((args.pairs, "--pairs"), (args.val, "--val")):
-        if d is None or not d.is_dir():
-            raise SystemExit(f"missing {label} dir {d}")
+    for d in list(args.pairs) + list(args.val or []) + list(args.test):
+        if not d.is_dir():
+            raise SystemExit(f"missing dir {d}")
+    if not args.val:
+        raise SystemExit("missing --val dir(s)")
     if args.mic_gate is not None and not args.mic_gate.is_dir():
         raise SystemExit(f"missing --mic-gate dir {args.mic_gate}")
     os.chdir(ROOT)
@@ -470,23 +678,28 @@ def main() -> int:
         return 1
 
     import tensorflow as tf
-    from basic_pitch import ICASSP_2022_MODEL_PATH, models
-    from basic_pitch.models import loss
+    from basic_pitch import ICASSP_2022_MODEL_PATH, inference, models
 
-    train_pairs = list(read_pairs(args.pairs))
-    val_pairs = list(read_pairs(args.val))
+    random.seed(args.seed)
+    tf.random.set_seed(args.seed)
+    t_start = time.time()
+    train_pairs = read_many(args.pairs)
+    val_pairs = read_many(args.val)
     if not train_pairs:
         raise SystemExit(f"no wav+mid pairs in {args.pairs}")
     if not val_pairs:
         raise SystemExit(f"no wav+mid pairs in {args.val}")
     mic_pairs = list(read_pairs(args.mic_gate)) if args.mic_gate else []
-    print(f"pairs: train={len(train_pairs)} val={len(val_pairs)} mic_gate={len(mic_pairs)}")
+    test_sets = {d.name: list(read_pairs(d)) for d in args.test}
+    log(f"pairs: train={len(train_pairs)} val={len(val_pairs)} mic_gate={len(mic_pairs)} "
+        f"tests={ {k: len(v) for k, v in test_sets.items()} }")
 
-    stamp = BUILD / str(int(tf.timestamp().numpy()))
+    stamp = BUILD / str(int(time.time()))
     stamp.mkdir(parents=True, exist_ok=True)
     train_tfr = stamp / "train.tfrecord"
     val_tfr = stamp / "val.tfrecord"
-    print("serializing TFRecords (source=synthetic_sf2, 22050 Hz mono)...")
+    log("serializing TFRecords (22050 Hz mono)...")
+    random.shuffle(train_pairs)  # mix sources so shuffle buffers see all of them
     train_stems = serialize_split(train_pairs, train_tfr)
     val_stems = serialize_split(val_pairs, val_tfr)
     (stamp / "pairs.json").write_text(json.dumps(
@@ -494,70 +707,110 @@ def main() -> int:
          "mic_gate": [s for s, _, _ in mic_pairs]}, indent=2))
     if not train_stems or not val_stems:
         raise SystemExit("no usable pairs after serialization")
+    (stamp / "args.json").write_text(json.dumps(
+        {k: (str(v) if isinstance(v, Path) else [str(x) for x in v] if isinstance(v, list) else v)
+         for k, v in vars(args).items()}, indent=2))
 
-    print("building datasets...")
-    train_ds = make_dataset(train_tfr, args.windows_per_track, args.batch, training=True)
+    log("building datasets...")
+    train_ds = make_dataset(train_tfr, args.windows_per_track, args.batch, training=True,
+                            augment=args.augment)
     val_ds = make_dataset(val_tfr, max(1, args.windows_per_track // 2), args.batch, training=False)
+    steps = args.steps_per_epoch or max(1, len(train_stems) * args.windows_per_track // args.batch)
 
-    print("loading ICASSP 2022 weights into models.model()...")
+    log("loading ICASSP 2022 weights into models.model()...")
     model = models.model(no_contours=False)
     model = load_pretrained(model)
+    if args.freeze_bn:
+        freeze_batchnorm(model)
 
-    # Stage A: 2 epochs at --lr with harmonic stacking frozen (vacuous: the
-    # layer is constructed trainable=False and holds no weights).
-    set_harmonic_stacking_trainable(model, False)
-    model.compile(optimizer=tf.keras.optimizers.Adam(args.lr),
-                  loss=loss(label_smoothing=0.2, weighted=True, positive_weight=0.95))
-    stage_a = min(2, args.epochs)
-    print(f"stage A: {stage_a} epoch(s) at lr={args.lr} (harmonic stacking frozen)")
-    model.fit(train_ds, validation_data=val_ds, epochs=stage_a)
+    # Stock baseline on val: early stopping must beat it to keep any fine-tuned weights.
+    log("stock baseline on val (mir_eval, 50 ms onset tolerance)...")
+    frozen = inference.Model(str(ICASSP_2022_MODEL_PATH))
+    frozen_val_out = model_outputs(frozen, val_pairs)
+    frozen_val = score_outputs(frozen_val_out, val_pairs, DEFAULT_ONSET_T, DEFAULT_FRAME_T)
+    log(f"  stock val note F1 {frozen_val['mean_f1']:.4f} P {frozen_val['mean_precision']:.3f} "
+        f"R {frozen_val['mean_recall']:.3f}")
 
-    # Stage B: unfreeze, drop to 1e-5, early-stop on val note-F1.
-    set_harmonic_stacking_trainable(model, True)
-    model.compile(optimizer=tf.keras.optimizers.Adam(1e-5),
-                  loss=loss(label_smoothing=0.2, weighted=True, positive_weight=0.95))
+    loss = models.loss(label_smoothing=args.label_smoothing,
+                       weighted=args.onset_loss == "weighted",
+                       positive_weight=args.positive_weight)
+    total_steps = steps * args.max_epochs
+    model.compile(optimizer=tf.keras.optimizers.Adam(
+        WarmupCosine(args.lr, args.warmup_steps, total_steps)), loss=loss)
     best_dir = stamp / "model.best"
-    best_weights = stamp / "best_weights.ckpt"
+    best_weights = stamp / "best_weights.h5"  # .h5: a single file, so exists() is truthful
     eval_json = stamp / "val_f1.json"
     stopper = NoteF1EarlyStopping(model, args.val, best_weights, eval_json,
-                                 patience=args.patience)
-    print(f"stage B: up to {args.max_epochs - stage_a} epoch(s) at lr=1e-5, "
-          f"early stop on val note-F1 (patience {args.patience})")
-    remaining = args.max_epochs - stage_a
-    for epoch in range(remaining):
-        model.fit(train_ds, validation_data=val_ds, epochs=1)
-        if stopper.on_epoch_end(stage_a + epoch, best_dir):
-            print(f"early stopping at epoch {stopper.stopped_epoch}")
+                                  patience=args.patience, baseline=frozen_val["mean_f1"])
+    log(f"training: up to {args.max_epochs} epochs x {steps} steps, peak lr {args.lr} "
+        f"(warmup {args.warmup_steps}, cosine), onset loss {args.onset_loss}, "
+        f"freeze_bn={args.freeze_bn}, augment={args.augment}; early stop on val note-F1 "
+        f"(patience {args.patience}, must beat stock {frozen_val['mean_f1']:.4f})")
+    for epoch in range(args.max_epochs):
+        model.fit(train_ds, validation_data=val_ds, epochs=epoch + 1, initial_epoch=epoch,
+                  steps_per_epoch=steps, verbose=2)
+        if stopper.on_epoch_end(epoch, best_dir):
+            log(f"early stopping at epoch {stopper.stopped_epoch}")
             break
-    print(f"best val note-F1 {stopper.best:.4f} at epoch {stopper.best_epoch}")
+    train_minutes = round((time.time() - t_start) / 60, 1)
     if best_weights.exists():
         model.load_weights(str(best_weights))
-        print("restored best-F1 weights")
+        log(f"restored best-F1 weights from epoch {stopper.best_epoch} (val F1 {stopper.best:.4f})")
+        improved = True
+    else:
+        log("no epoch beat stock on val; keeping stock weights")
+        model = load_pretrained(model)
+        improved = False
     model.save(str(best_dir))
 
-    # ---- eval: fine-tuned vs frozen ICASSP checkpoint, synthetic + mic gate
-    from basic_pitch import inference
-
-    print("evaluating (mir_eval, 50 ms onset tolerance)...")
+    # ---- eval: fine-tuned vs frozen ICASSP checkpoint, val + tests + mic gate
+    log("evaluating (mir_eval, 50 ms onset tolerance)...")
     tuned = inference.Model(str(best_dir))
-    frozen = inference.Model(str(ICASSP_2022_MODEL_PATH))
-    tuned_val = evaluate_model(tuned, val_pairs)
-    frozen_val = evaluate_model(frozen, val_pairs)
-    tuned_mic = evaluate_model(tuned, mic_pairs) if mic_pairs else None
-    frozen_mic = evaluate_model(frozen, mic_pairs) if mic_pairs else None
+    tuned_val_out = model_outputs(tuned, val_pairs)
+    tuned_val = score_outputs(tuned_val_out, val_pairs, DEFAULT_ONSET_T, DEFAULT_FRAME_T)
+    thresholds = {"stock": [DEFAULT_ONSET_T, DEFAULT_FRAME_T], "tuned": [DEFAULT_ONSET_T, DEFAULT_FRAME_T]}
+    if args.tune_thresholds:
+        so, sf, _ = tune_thresholds(frozen_val_out, val_pairs)
+        to, tfr, _ = tune_thresholds(tuned_val_out, val_pairs)
+        thresholds = {"stock": [so, sf], "tuned": [to, tfr]}
+        log(f"tuned thresholds on val: stock onset {so} frame {sf}; fine-tuned onset {to} frame {tfr}")
+
+    def both(pairs):
+        if not pairs:
+            return None
+        fo, to_ = model_outputs(frozen, pairs), model_outputs(tuned, pairs)
+        r = {"stock": summarize(score_outputs(fo, pairs, DEFAULT_ONSET_T, DEFAULT_FRAME_T)),
+             "tuned": summarize(score_outputs(to_, pairs, DEFAULT_ONSET_T, DEFAULT_FRAME_T))}
+        if args.tune_thresholds:
+            r["stock@thr"] = summarize(score_outputs(fo, pairs, *thresholds["stock"]))
+            r["tuned@thr"] = summarize(score_outputs(to_, pairs, *thresholds["tuned"]))
+        return r
+
+    tests = {name: both(p) for name, p in test_sets.items()}
+    mic = both(mic_pairs)
+    tuned_mic = mic["tuned"] if mic else None
+    frozen_mic = mic["stock"] if mic else None
 
     ship = (
-        tuned_val["mean_f1"] >= frozen_val["mean_f1"]
+        improved
+        and tuned_val["mean_f1"] >= frozen_val["mean_f1"]
         and tuned_mic is not None
         and tuned_mic["n_clips"] >= 30
         and tuned_mic["mean_f1"] >= frozen_mic["mean_f1"] - 0.02
     )
     metrics = {
         "stamp": stamp.name,
-        "train_stems": train_stems,
-        "synthetic_val": {"tuned": tuned_val, "frozen_icassp": frozen_val},
-        "real_mic_gate": {"tuned": tuned_mic, "frozen_icassp": frozen_mic},
+        "args": json.loads((stamp / "args.json").read_text()),
+        "train_tracks": len(train_stems),
+        "train_minutes": train_minutes,
+        "best_epoch": stopper.best_epoch,
+        "history": stopper.history,
+        "synthetic_val": {"tuned": summarize(tuned_val), "frozen_icassp": summarize(frozen_val)},
+        "thresholds": thresholds,
+        "tests": tests,
+        "real_mic_gate": mic,
         "ship_rule": {
+            "beat_stock_during_training": improved,
             "synthetic_val_f1_at_least_stock": tuned_val["mean_f1"] >= frozen_val["mean_f1"],
             "mic_clips": tuned_mic["n_clips"] if tuned_mic else 0,
             "mic_f1_within_2pts": (
@@ -565,28 +818,34 @@ def main() -> int:
             "ship": ship,
         },
     }
-    metrics_path = BUILD / "metrics.json"
-    metrics_path.write_text(json.dumps(metrics, indent=2))
-    print(f"metrics -> {metrics_path}")
-    print(f"synthetic val F1: tuned {tuned_val['mean_f1']:.4f} vs stock {frozen_val['mean_f1']:.4f}")
+    (stamp / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    (BUILD / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    log(f"metrics -> {stamp / 'metrics.json'}")
+    log(f"val F1: tuned {tuned_val['mean_f1']:.4f} vs stock {frozen_val['mean_f1']:.4f}")
+    for name, r in tests.items():
+        if r:
+            log(f"test {name}: tuned {r['tuned']['mean_f1']:.4f} vs stock {r['stock']['mean_f1']:.4f}")
     if tuned_mic:
-        print(f"real-mic F1: tuned {tuned_mic['mean_f1']:.4f} vs stock {frozen_mic['mean_f1']:.4f} "
-              f"({tuned_mic['n_clips']} clips)")
+        log(f"real-mic F1: tuned {tuned_mic['mean_f1']:.4f} vs stock {frozen_mic['mean_f1']:.4f} "
+            f"({tuned_mic['n_clips']} clips)")
     else:
-        print("real-mic gate: not provided (--mic-gate); cannot ship without it")
+        log("real-mic gate: not provided (--mic-gate); cannot ship without it")
 
     if not ship:
-        print("SHIP RULE FAILED (or mic gate missing): stock weights stay. "
-              "models.lock untouched.")
+        log("SHIP RULE FAILED (or mic gate missing): stock weights stay. models.lock untouched.")
         return 2
 
-    # ---- ship: export Core ML, bundle, re-fetch
-    print("ship rule passed; exporting Core ML...")
+    if platform.system() != "Darwin":
+        log(f"ship rule passed, but Core ML export needs macOS. Fine-tuned SavedModel: {best_dir}")
+        log("Re-run the export on the Mac, or convert the SavedModel for the web demo "
+            "(tools/web-demo/convert-model.sh).")
+        return 0
+    log("ship rule passed; exporting Core ML...")
     package = export_coreml(model, BUILD / PACKAGE_NAME, val_pairs, best_dir)
     r = subprocess.run(["scripts/bundle-coreml", str(package)], check=False)
     if r.returncode != 0:
         raise SystemExit("scripts/bundle-coreml failed")
-    print("bundled. Run scripts/fetch-models (Xcode does this) to verify the pin.")
+    log("bundled. Run scripts/fetch-models (Xcode does this) to verify the pin.")
     return 0
 
 

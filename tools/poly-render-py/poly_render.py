@@ -68,9 +68,11 @@ MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10]
 TRIADS = [[0, 4, 7], [0, 3, 7], [0, 4, 7, 11], [0, 3, 7, 10], [0, 4, 7, 10]]
 
 
-def gen_etude(rng: RNG, seconds: float):
+def gen_etude(rng: RNG, seconds: float, extra_patterns: bool = False):
     """Returns (notes, tempo, key_root, minor).
-    notes: list of (midi, start16, dur16, vel)."""
+    notes: list of (midi, start16, dur16, vel).
+    extra_patterns adds dense two-hand voicings, fast 16th passages and
+    melody-over-chords (patterns 4-6); off keeps the original 4 byte-identical."""
     tempo = rng.double(80, 141)
     total16 = max(16, int(seconds * tempo / 60.0 * 4.0))
     minor = rng.int(0, 2) == 1
@@ -87,7 +89,7 @@ def gen_etude(rng: RNG, seconds: float):
         return max(21, min(108, m))
 
     notes = []
-    pat = rng.int(0, 4)
+    pat = rng.int(0, 7) if extra_patterns else rng.int(0, 4)
     if pat == 0:  # chord loop + bass root
         roots = [0, 5, 2, 6] if minor else [0, 5, 3, 4]
         t = 0
@@ -118,6 +120,44 @@ def gen_etude(rng: RNG, seconds: float):
             tone = root + chord[step % len(chord)] + 12 * ((step // len(chord)) % 2)
             notes.append((clamp(tone), t, 2, rng.int(70, 100)))
             t += 2
+    elif pat == 4:  # dense voicings: 4-6 notes over 2-3 octaves, varied rhythm
+        t = 0
+        while True:
+            len16 = [2, 4, 4, 8, 8][rng.int(0, 5)]
+            if t + len16 > total16:
+                break
+            root = deg_midi(rng.int(0, 7), rng.int(-1, 1))
+            chord = TRIADS[rng.int(0, len(TRIADS))]
+            tones = {clamp(root - 12)}
+            for iv in chord:
+                tones.add(clamp(root + iv))
+            for _ in range(rng.int(1, 3)):
+                tones.add(clamp(root + 12 + chord[rng.int(0, len(chord))]))
+            for m in sorted(tones):
+                notes.append((m, t, max(1, len16 - rng.int(0, 2)), rng.int(40, 120)))
+            t += len16
+    elif pat == 5:  # fast 16th-note runs (scale fragments), both hands
+        t, d, direction = 0, rng.int(0, 7), 1
+        while t + 1 <= total16:
+            notes.append((clamp(deg_midi(d, 1)), t, 1, rng.int(50, 115)))
+            if t % 4 == 0:
+                notes.append((clamp(deg_midi(d - 7, 0)), t, 3, rng.int(45, 100)))
+            d += direction
+            if d >= 10 or d <= -3 or rng.int(0, 8) == 0:
+                direction = -direction
+            t += 1
+    elif pat == 6:  # sustained chords + independent melody (overlapping notes)
+        t = 0
+        while t + 16 <= total16:
+            root = deg_midi([0, 3, 4, 5][(t // 16) % 4], -1)
+            for iv in TRIADS[rng.int(0, len(TRIADS))]:
+                notes.append((clamp(root + iv), t, 16, rng.int(40, 90)))
+            u = t
+            while u < t + 16:
+                len16 = [1, 2, 2, 3, 4][rng.int(0, 5)]
+                notes.append((clamp(deg_midi(rng.int(0, 10), 1)), u, len16, rng.int(60, 120)))
+                u += len16
+            t += 16
     else:  # random-walk melody + sparse bass
         t, d = 0, rng.int(0, 7)
         while True:
@@ -144,22 +184,27 @@ def _vlq(value: int) -> bytes:
     return bytes(reversed(out))
 
 
-def write_smf0(path: str, notes, tempo: float, tail_sec: float = TAIL_SEC) -> None:
-    """notes: (midi, start16, dur16, vel). 16th = TPQ/4 ticks."""
+def write_smf0(path: str, notes, tempo: float, tail_sec: float = TAIL_SEC,
+               programs: dict | None = None) -> None:
+    """notes: (midi, start16, dur16, vel[, channel]). 16th = TPQ/4 ticks.
+    programs: {channel: GM program}; default {0: 0} (piano)."""
     tick16 = TPQ // 4
-    total16 = max((s + d for _, s, d, _ in notes), default=0)
+    total16 = max((n[1] + n[2] for n in notes), default=0)
     events = []  # (tick, order, bytes); note-offs sort before note-ons at same tick
-    for midi, s16, d16, vel in notes:
+    for n in notes:
+        midi, s16, d16, vel = n[:4]
+        ch = n[4] if len(n) > 4 else 0
         on_tick = s16 * tick16
         off_tick = (s16 + d16) * tick16
-        events.append((on_tick, 1, bytes([0x90, midi, vel])))
-        events.append((off_tick, 0, bytes([0x80, midi, 0])))
+        events.append((on_tick, 1, bytes([0x90 | ch, midi, vel])))
+        events.append((off_tick, 0, bytes([0x80 | ch, midi, 0])))
     tail_tick = total16 * tick16 + int(tail_sec * tempo / 60.0 * TPQ)
 
     us_per_quarter = int(round(60_000_000 / tempo))
     track = _vlq(0) + b"\xFF\x51\x03" + us_per_quarter.to_bytes(3, "big")
     track += _vlq(0) + b"\xFF\x58\x04\x04\x02\x18\x08"  # 4/4
-    track += _vlq(0) + bytes([0xC0, 0x00])  # program 0 (piano)
+    for ch, prog in sorted((programs or {0: 0}).items()):
+        track += _vlq(0) + bytes([0xC0 | ch, prog])  # default: channel 0, program 0 (piano)
 
     last = 0
     for tick, _, data in sorted(events, key=lambda e: (e[0], e[1])):
@@ -180,15 +225,20 @@ def fail(msg: str) -> "typing.NoReturn":
 
 
 def render_wav(midi_path: str, sf2_path: str, out_wav: str,
-               sample_rate: int = SAMPLE_RATE, gain: float = 1.0) -> int:
+               sample_rate: int = SAMPLE_RATE, gain: float = 1.0,
+               reverb: bool | None = None, chorus: bool | None = None) -> int:
     """Render MIDI to mono 16-bit WAV via the fluidsynth binary. Returns sample count."""
     if shutil.which("fluidsynth") is None:
         fail("fluidsynth binary not found on PATH. Install it first:\n"
              "  macOS:  brew install fluid-synth\n"
              "  Debian: sudo apt install fluidsynth")
     tmp = out_wav + ".fluid.wav"
-    cmd = ["fluidsynth", "-ni", "-r", str(sample_rate), "-g", str(gain),
-           "-F", tmp, sf2_path, midi_path]
+    cmd = ["fluidsynth", "-ni", "-r", str(sample_rate), "-g", str(gain)]
+    if reverb is not None:  # None = fluidsynth's default
+        cmd += ["-R", "1" if reverb else "0"]
+    if chorus is not None:
+        cmd += ["-C", "1" if chorus else "0"]
+    cmd += ["-F", tmp, sf2_path, midi_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
@@ -240,11 +290,67 @@ def _write_wav16(path: str, samples: list, sample_rate: int) -> None:
         f.write(struct.pack("<%dh" % n, *(max(-32768, min(32767, int(s * 32767))) for s in samples)))
 
 
+# MARK: - Instruments (opt-in; default is piano on channel 0)
+
+# GM program -> playable MIDI range, by family (program // 8)
+FAMILY_RANGE = {0: (21, 108), 1: (48, 96), 2: (36, 96), 3: (40, 88), 4: (28, 67),
+                5: (36, 100), 6: (36, 96), 7: (40, 84), 8: (50, 90), 9: (60, 96),
+                10: (36, 96), 11: (36, 96)}
+
+
+def fit_range(m: int, prog: int) -> int:
+    lo, hi = FAMILY_RANGE.get(prog // 8, (21, 108))
+    while m < lo:
+        m += 12
+    while m > hi:
+        m -= 12
+    return max(lo, min(hi, m))
+
+
+def assign_instruments(notes, rng: RNG, programs: list, multi: bool):
+    """Pick a program per etude (and, with multi, a second one for the low part on
+    channel 1). Notes are octave-shifted into each instrument's range; exact duplicates
+    created by the shift are dropped. Returns (notes5, {channel: program})."""
+    prog = rng.pick(programs)
+    chans = {0: prog}
+    split = None
+    if multi and len(programs) > 1:
+        chans[1] = rng.pick(programs)
+        split = 55
+    out, seen = [], set()
+    for m, s16, d16, v in notes:
+        ch = 1 if split is not None and m < split else 0
+        m2 = fit_range(m, chans[ch])
+        key = (m2, s16)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((m2, s16, d16, v, ch))
+    return out, chans
+
+
+def remap_velocity(notes, lo: int, hi: int):
+    return [(n[0], n[1], n[2], max(1, min(127, int(round(lo + (n[3] - 40) / 80.0 * (hi - lo)))))) + tuple(n[4:])
+            for n in notes]
+
+
+def _render_job(job):
+    stem, mid_path, sf2, wav_path, rate, gain, reverb, chorus = job
+    try:
+        return stem, render_wav(mid_path, sf2, wav_path, sample_rate=rate, gain=gain,
+                                reverb=reverb, chorus=chorus), None
+    except SystemExit as e:
+        return stem, 0, f"fluidsynth failed ({e})"
+    except Exception as e:  # noqa: BLE001
+        return stem, 0, str(e)
+
+
 # MARK: - Main
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Render paired WAV+MIDI training data with FluidSynth.")
-    ap.add_argument("--soundfont", required=True, help="path to .sf2 (from scripts/fetch-models)")
+    ap.add_argument("--soundfont", required=True, nargs="+",
+                    help="path(s) to .sf2; with several, each etude picks one (seeded)")
     ap.add_argument("--out", required=True, help="output directory")
     ap.add_argument("--generate", type=int, default=0, help="number of seeded etudes to synthesize")
     ap.add_argument("--seed", type=int, default=7)
@@ -252,25 +358,59 @@ def main() -> None:
     ap.add_argument("--midi", nargs="*", default=[], help="existing MIDI files to render")
     ap.add_argument("--sample-rate", type=int, default=SAMPLE_RATE)
     ap.add_argument("--gain", type=float, default=1.0, help="fluidsynth gain")
+    ap.add_argument("--programs", type=lambda v: [int(x) for x in v.split(",")], default=None,
+                    help="comma list of GM programs; each etude picks one (default: piano only)")
+    ap.add_argument("--multi-instrument", action="store_true",
+                    help="with --programs: low part (< MIDI 55) on a second random program")
+    ap.add_argument("--extra-patterns", action="store_true",
+                    help="add dense voicings, fast runs and melody-over-chords patterns")
+    ap.add_argument("--velocity-range", type=int, nargs=2, metavar=("LO", "HI"), default=None,
+                    help="remap generated velocities into [LO, HI] (e.g. 20 127)")
+    ap.add_argument("--gain-range", type=float, nargs=2, metavar=("LO", "HI"), default=None,
+                    help="random fluidsynth gain per etude")
+    ap.add_argument("--reverb-prob", type=float, default=None,
+                    help="probability of fluidsynth reverb on (default: fluidsynth's default)")
+    ap.add_argument("--chorus-prob", type=float, default=None,
+                    help="probability of fluidsynth chorus on (default: fluidsynth's default)")
+    ap.add_argument("--jobs", type=int, default=1, help="parallel fluidsynth renders")
     args = ap.parse_args()
 
-    if not os.path.isfile(args.soundfont):
-        fail(f"no SoundFont at {args.soundfont} (run scripts/fetch-models first)")
+    for sf2 in args.soundfont:
+        if not os.path.isfile(sf2):
+            fail(f"no SoundFont at {sf2} (run scripts/fetch-models first)")
     os.makedirs(args.out, exist_ok=True)
+    # Choices that are not part of the etude (soundfont, program, fx) come from a
+    # second RNG so the default note stream stays byte-identical to older versions.
+    vrng = RNG(args.seed ^ 0x5F3759DF)
+    render_opts = {}
 
     jobs = []  # (stem, midi_path_or_None, gen_notes_or_None, meta)
     rng = RNG(args.seed)
     for i in range(args.generate):
-        notes, tempo, key_root, minor = gen_etude(rng, args.seconds)
+        notes, tempo, key_root, minor = gen_etude(rng, args.seconds, args.extra_patterns)
         stem = f"etude-{i:05d}"
         mid_path = os.path.join(args.out, stem + ".mid")
-        write_smf0(mid_path, notes, tempo)
-        jobs.append((stem, mid_path, notes, {
+        if args.velocity_range:
+            notes = remap_velocity(notes, *args.velocity_range)
+        chans = None
+        if args.programs:
+            notes, chans = assign_instruments(notes, vrng, args.programs, args.multi_instrument)
+        write_smf0(mid_path, notes, tempo, programs=chans)
+        sf2 = args.soundfont[0] if len(args.soundfont) == 1 else vrng.pick(args.soundfont)
+        gain = args.gain if not args.gain_range else vrng.double(*args.gain_range)
+        reverb = None if args.reverb_prob is None else vrng.double(0, 1) < args.reverb_prob
+        chorus = None if args.chorus_prob is None else vrng.double(0, 1) < args.chorus_prob
+        render_opts[stem] = (sf2, gain, reverb, chorus)
+        meta = {
             "generator": "poly-render-py", "seed": args.seed, "index": i,
             "tempo": tempo, "key_root": key_root, "minor": minor,
-            "notes": [{"midi": m, "start16": s, "duration16": d, "velocity": v}
-                      for m, s, d, v in notes],
-        }))
+            "notes": [{"midi": n[0], "start16": n[1], "duration16": n[2], "velocity": n[3]}
+                      for n in notes],
+        }
+        if len(args.soundfont) > 1 or chans or args.gain_range or reverb is not None or chorus is not None:
+            meta.update({"soundfont": os.path.basename(sf2), "programs": chans, "gain": gain,
+                         "reverb": reverb, "chorus": chorus})
+        jobs.append((stem, mid_path, notes, meta))
     for m in args.midi:
         if not os.path.isfile(m):
             fail(f"cannot read {m}")
@@ -280,18 +420,30 @@ def main() -> None:
         fail("nothing to do: pass --generate N or --midi files")
 
     done = 0
+    render_jobs = []
+    for stem, mid_path, _notes, _meta in jobs:
+        sf2, gain, reverb, chorus = render_opts.get(stem, (args.soundfont[0], args.gain, None, None))
+        render_jobs.append((stem, mid_path, sf2, os.path.join(args.out, stem + ".wav"),
+                            args.sample_rate, gain, reverb, chorus))
+    if args.jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(args.jobs) as ex:
+            results = {r[0]: r for r in ex.map(_render_job, render_jobs)}
+    else:
+        results = {}
+        for j in render_jobs:
+            r = _render_job(j)
+            if r[2] and "fluidsynth" in r[2] and shutil.which("fluidsynth") is None:
+                fail(r[2])
+            results[j[0]] = r
     for stem, mid_path, _notes, meta in jobs:
         wav_path = os.path.join(args.out, stem + ".wav")
-        try:
-            nsamp = render_wav(mid_path, args.soundfont, wav_path,
-                               sample_rate=args.sample_rate, gain=args.gain)
-        except SystemExit:
-            raise
-        except Exception as e:  # noqa: BLE001 - keep going over a large batch
-            sys.stderr.write(f"skip {stem}: {e}\n")
+        _s, nsamp, err = results[stem]
+        if err:
+            sys.stderr.write(f"skip {stem}: {err}\n")
             continue
         # keep a copy of generated MIDIs next to the WAV (source MIDIs stay in place)
-        if mid_path.startswith(os.path.abspath(args.out) + os.sep):
+        if os.path.abspath(mid_path).startswith(os.path.abspath(args.out) + os.sep):
             mid_out = mid_path
         else:
             mid_out = os.path.join(args.out, stem + ".mid")
