@@ -3,6 +3,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: ProStore
+    @ObservedObject private var push = PushManager.shared
+    @State private var shareUsage = Telemetry.shared.isEnabled
+    @State private var pushBusy = false
     @Environment(\.dismiss) private var dismiss
     @State private var showPaywall = false
     @State private var restoring = false
@@ -37,6 +40,29 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(restoring)
+                }
+
+                Section {
+                    Toggle("Notifications", isOn: Binding(
+                        get: { push.enabledInApp },
+                        set: { on in
+                            pushBusy = true
+                            Task {
+                                if on { await push.enable() } else { await push.disable() }
+                                pushBusy = false
+                            }
+                        }))
+                        .disabled(pushBusy)
+                    Toggle("Share anonymous usage data", isOn: $shareUsage)
+                        .onChange(of: shareUsage) { _, on in Telemetry.shared.isEnabled = on }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    if push.status == .denied {
+                        Text("Notifications are off for AI Music Radar in iOS Settings.")
+                    } else {
+                        Text("Usage data is anonymous: feature events only, never audio, notes or titles.")
+                    }
                 }
 
                 Section("About") {
