@@ -1,0 +1,76 @@
+name: ASC TestFlight crash logs
+
+# Read-only. Downloads the latest TestFlight crash submissions (betaFeedbackCrashSubmissions + crashLog)
+# for AI Music Radar and, as a fallback, the build's diagnostic signatures/logs. Output goes to a short-lived
+# artifact only (crash logs can contain device info; never commit them).
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        required: false
+        type: string
+        default: "10"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography requests
+          mkdir -p out
+          python3 -u <<'PY'
+          import json, os, sys, time, jwt, requests
+          APP = '6818838017'
+          p8 = os.environ['APP_STORE_CONNECT_API_KEY_P8'].replace('\\n', '\n').strip()
+          now = int(time.time())
+          tok = jwt.encode({'iss': os.environ['APP_STORE_CONNECT_ISSUER_ID'].strip(), 'iat': now, 'exp': now + 1200, 'aud': 'appstoreconnect-v1'},
+                           p8, algorithm='ES256', headers={'kid': os.environ['APP_STORE_CONNECT_KEY_ID'].strip()})
+          H = {'Authorization': f'Bearer {tok}'}
+          def get(p):
+            r = requests.get(p if p.startswith('http') else 'https://api.appstoreconnect.apple.com' + p, headers=H, timeout=60)
+            print(f'GET {p[:140]} -> {r.status_code}')
+            return r.status_code, (r.json() if r.text and r.headers.get('content-type', '').startswith('application/json') else r.text)
+          lim = int(os.environ['LIMIT'])
+          st, subs = get(f'/v1/apps/{APP}/betaFeedbackCrashSubmissions?limit={lim}&sort=-createdDate&include=build')
+          if st >= 400:
+            print(json.dumps(subs)[:1500])
+            st, subs = get(f'/v1/apps/{APP}/betaFeedbackCrashSubmissions?limit={lim}')
+          json.dump(subs, open('out/crash_submissions.json', 'w'), indent=1)
+          builds = {}
+          for s in (subs.get('data', []) if isinstance(subs, dict) else []):
+            a = s['attributes']
+            b = (s.get('relationships', {}).get('build', {}).get('data') or {}).get('id')
+            builds[b] = 1
+            print(f"submission {s['id']} {a.get('createdDate')} device={a.get('deviceModel')} os={a.get('osVersion')} build={b} comment={a.get('comment')!r}")
+            st, log = get(f"/v1/betaFeedbackCrashSubmissions/{s['id']}/crashLog")
+            json.dump(log, open(f"out/crashlog_{s['id']}.json", 'w'), indent=1)
+            text = (log.get('data', {}).get('attributes', {}) or {}).get('logText') if isinstance(log, dict) else None
+            if text:
+              open(f"out/crashlog_{s['id']}.ips", 'w').write(text)
+              print(f'  crashLog: {len(text)} chars')
+            else:
+              print(f'  crashLog empty/unavailable: {str(log)[:300]}')
+          # Fallback: diagnostics on recent builds
+          st, bl = get(f'/v1/builds?filter[app]={APP}&sort=-uploadedDate&limit=3')
+          for b in (bl.get('data', []) if isinstance(bl, dict) else []):
+            bid, ver = b['id'], b['attributes'].get('version')
+            st, sig = get(f'/v1/builds/{bid}/diagnosticSignatures?limit=50')
+            json.dump(sig, open(f'out/diag_signatures_build{ver}.json', 'w'), indent=1)
+            for d in (sig.get('data', []) if isinstance(sig, dict) else []):
+              print(f"  build {ver} signature {d['id']} {d['attributes'].get('diagnosticType')} weight={d['attributes'].get('weight')} {d['attributes'].get('signature')!r}")
+              st, logs = get(f"/v1/diagnosticSignatures/{d['id']}/logs?limit=10")
+              json.dump(logs, open(f"out/diag_logs_{d['id']}.json", 'w'), indent=1)
+          PY
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs
+          path: out
+          retention-days: 3
