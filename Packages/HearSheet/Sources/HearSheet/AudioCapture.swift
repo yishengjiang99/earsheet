@@ -19,6 +19,10 @@ public final class AudioRecorder {
     /// Called on the audio thread with the current peak level (0...1).
     public var onLevel: ((Float) -> Void)?
 
+    /// Called on the audio thread with each tap's samples (a copy).
+    /// Used by the live-listening screen to feed the streaming transcriber.
+    public var onSamples: (([Float]) -> Void)?
+
     public init() {}
 
     public func start() throws {
@@ -54,8 +58,12 @@ public final class AudioRecorder {
             }
             if localPeak > self.peak { self.peak = localPeak } else { self.peak *= 0.999 }
             let p = self.peak
+            let emit = self.onSamples
             self.lock.unlock()
             self.onLevel?(p)
+            if let emit {
+                emit(Array(UnsafeBufferPointer(start: ch, count: min(n, remaining))))
+            }
         }
         engine.prepare()
         try engine.start()

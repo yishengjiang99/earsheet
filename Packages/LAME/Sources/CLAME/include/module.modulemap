@@ -1,0 +1,4 @@
+module CLAME {
+    umbrella header "lame.h"
+    export *
+}
