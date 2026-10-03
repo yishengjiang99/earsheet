@@ -40,9 +40,30 @@ public final class AudioRecorder {
         peak = 0
         lock.unlock()
 
+        // An input-node tap must use the hardware format (48 kHz on current iPhones): asking for
+        // 22050 Hz here raises "format.sampleRate == hwFormat.sampleRate" (SIGABRT). Tap in the
+        // hardware format and resample to 22050 Hz mono ourselves.
         let input = engine.inputNode
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
+        let hwFormat = input.outputFormat(forBus: 0)
+        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0,
+              let converter = AVAudioConverter(from: hwFormat, to: format) else {
+            throw NSError(domain: "HearSheet.AudioRecorder", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "No microphone input is available."])
+        }
+        let ratio = format.sampleRate / hwFormat.sampleRate
+        input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] hwBuffer, _ in
             guard let self else { return }
+            let capacity = AVAudioFrameCount(Double(hwBuffer.frameLength) * ratio) + 64
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return }
+            var fed = false
+            var convError: NSError?
+            converter.convert(to: buffer, error: &convError) { _, status in
+                if fed { status.pointee = .noDataNow; return nil }
+                fed = true
+                status.pointee = .haveData
+                return hwBuffer
+            }
+            if convError != nil { return }
             let n = Int(buffer.frameLength)
             guard n > 0, let channels = buffer.floatChannelData else { return }
             let ch = channels[0]
