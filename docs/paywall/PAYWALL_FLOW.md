@@ -1,6 +1,6 @@
 # Free → Pro paywall: user flow and interstitial design
 
-Status: **design draft**. Pricing and product IDs are **proposed** and still need owner sign-off (see [`docs/marketing/MARKETING_PLAN.md` §5](../marketing/MARKETING_PLAN.md)). Nothing here is implemented yet, and no in-app purchase products exist in App Store Connect.
+Status: **design draft**. Pricing and product IDs are **proposed** and still need owner sign-off (see [`docs/marketing/MARKETING_PLAN.md` §5](../marketing/MARKETING_PLAN.md)). Nothing here is implemented in the app yet. The IAP products and the server (`server/`) exist: see [`docs/IOS_HANDOFF.md`](../IOS_HANDOFF.md).
 
 Mockups live in [`mockups/`](mockups/): 1320×2868 PNGs (iPhone 6.9", 440×956 pt @3x). The HTML/CSS source is in [`mockups/src/`](mockups/src/), and [`mockups/render.sh`](mockups/render.sh) re-renders them with headless Chrome. The visual language is the app's own: `Ink.paper` background, `Ink.ink` text, `Ink.teal` actions (from `Sources/App/ListeningView.swift`), serif headlines like the onboarding and Sheets mockups in [`docs/ui-mockups/`](../ui-mockups/), and the sheet-detail layout from `SheetDetailView.swift` (title, BPM/meter/key caption, Page/Piano roll picker, play, share).
 
@@ -31,13 +31,13 @@ Prices (proposed): **Pro Monthly $4.99/month**, **Pro Yearly $29.99/year** (≈ 
 
 The marketing plan also lists key/meter/tempo edits and slow playback for Pro. The paywall must not mention them until they ship.
 
-StoreKit product IDs: **all TBD**, none exist in ASC yet. Placeholders:
+StoreKit product IDs (created in ASC 2026-10-03 by `asc-setup-iap.yml`; group "AI Music Radar Pro"):
 
 | Product | Type | Placeholder ID |
 |---|---|---|
-| Pro Monthly | Auto-renewable, group "Pro" | `com.ragnus.pnge.pro.monthly` (TBD) |
-| Pro Yearly | Auto-renewable, group "Pro" | `com.ragnus.pnge.pro.yearly` (TBD) |
-| Lifetime | Non-consumable | `com.ragnus.pnge.pro.lifetime` (TBD) |
+| Pro Monthly | Auto-renewable, group "Pro" | `com.ragnus.pnge.pro.monthly` (created) |
+| Pro Yearly | Auto-renewable, group "Pro" | `com.ragnus.pnge.pro.yearly` (created) |
+| Lifetime | Non-consumable | `com.ragnus.pnge.lifetime` (created in ASC; see `docs/iap/IOS_INTEGRATION.md`) |
 
 Bundle id is `com.ragnus.pnge` (see `docs/asc/APP_IDENTITY.md`). The 7-day trial is an introductory offer configured on the two subscriptions in ASC. Entitlement = active Pro subscription **or** owned Lifetime.
 
