@@ -98,7 +98,7 @@ for (const name of cases) {
   const logs = [];
   page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
-  await page.goto(`${base}?backend=${backend}`);
+  await page.goto(`${base}?backend=${backend}${args.model ? `&model=${args.model}` : ''}`);
   await page.waitForFunction(() => window.__earsheet && (window.__earsheet.ready || window.__earsheet.error), null, { timeout: 120000 });
   await page.click('#rec-btn');
   const samples = [];

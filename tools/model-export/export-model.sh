@@ -48,11 +48,17 @@ import sys
 import coremltools as ct
 import tensorflow as tf
 m = tf.keras.models.load_model(sys.argv[1], compile=False)
+in_name = m.inputs[0].name.split(":")[0]  # stock: input_2; models.model() rebuilds: input_1
 ml = ct.convert(m, convert_to="mlprogram", source="tensorflow",
-                inputs=[ct.TensorType(name="input_2", shape=(1, 43844, 1))],
+                inputs=[ct.TensorType(name=in_name, shape=(1, 43844, 1))],
                 compute_precision=ct.precision.FLOAT32,
                 minimum_deployment_target=ct.target.iOS16)
+spec = ml.get_spec()
+if in_name != "input_2":  # keep the stock feature name the app feeds
+    ct.utils.rename_feature(spec, in_name, "input_2")
+    ml = ct.models.MLModel(spec, weights_dir=ml.weights_dir)
 outs = [o.name for o in ml.get_spec().description.output]
+assert [i.name for i in ml.get_spec().description.input] == ["input_2"]
 assert outs == ["Identity", "Identity_1", "Identity_2"], outs
 ml.short_description = "Basic Pitch NMP (earsheet export). note=Identity_1 onset=Identity_2 contour=Identity"
 ml.save(sys.argv[2])
