@@ -92,6 +92,10 @@ jobs:
               print('assign result', attrs.get('name'), e)
 
           # Also list builds visible / beta build localizations
-          _, rel = api('GET', f'/v1/builds/{build_id}/relationships/betaGroups')
-          print('build betaGroups', rel)
+          internal = [g for g in groups.get('data', []) if g['attributes'].get('isInternalGroup')]
+          if not internal:
+            print('::warning::app has no internal TestFlight group; create one in App Store Connect (TestFlight > Internal Testing) and add testers')
+          for g in internal:
+            _, gb = api('GET', f"/v1/betaGroups/{g['id']}/builds?limit=50")
+            print('group', g['attributes'].get('name'), 'has build', any(b['id'] == build_id for b in gb.get('data', [])), 'allBuilds', g['attributes'].get('hasAccessToAllBuilds'))
           PY
