@@ -175,9 +175,13 @@ public final class BasicPitchModel {
 /// Lazily loads and shares one BasicPitchModel across transcriptions.
 /// Thread-safe; safe to capture in a detached task.
 public final class ModelBox: Sendable {
+    /// The app-wide loader. All call sites share one cached model;
+    /// do not create additional instances.
+    public static let shared = ModelBox()
+
     private let inner = LockedModelBox()
 
-    public init() {}
+    private init() {}
 
     /// Returns the cached model for `modelsDirectory`, loading it on first use.
     /// Call off the main thread: the first call compiles the Core ML package.

@@ -36,7 +36,6 @@ final class ListeningSession: ObservableObject {
     private let recorder = AudioRecorder()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
-    private var modelBox = ModelBox()
     private var timer: Timer?
 
     init(library: TakeLibrary) {
@@ -58,10 +57,9 @@ final class ListeningSession: ObservableObject {
 
     private func begin() async {
         // Load the model before opening the mic; inference must keep up live.
-        let box = modelBox
         do {
             let model = try await Task.detached(priority: .userInitiated) {
-                try box.get(modelsDirectory: BundledModels.modelsDirectory())
+                try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
             }.value
             let streamer = StreamingTranscriber(model: model)
             self.streamer = streamer

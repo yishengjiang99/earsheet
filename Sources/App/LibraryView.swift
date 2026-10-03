@@ -173,7 +173,7 @@ struct LibraryView: View {
                 try? FileManager.default.removeItem(at: url) // temp copy
                 guard !samples.isEmpty else { return }
                 let notes = try await Task.detached(priority: .userInitiated) {
-                    let box = ModelBox()
+                    let box = ModelBox.shared
                     let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }.value
@@ -198,7 +198,7 @@ struct LibraryView: View {
                 }.value
                 guard !samples.isEmpty else { return }
                 let notes = try await Task.detached(priority: .userInitiated) {
-                    let box = ModelBox()
+                    let box = ModelBox.shared
                     let model = try box.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }.value
