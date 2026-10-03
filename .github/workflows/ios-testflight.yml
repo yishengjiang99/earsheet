@@ -61,12 +61,14 @@ jobs:
           path: models
           key: homr-models-${{ hashFiles('models.lock') }}
 
-      - name: Fetch ONNX models (sha256-pinned)
+      - name: Fetch models (sha256-pinned, models.lock)
         run: |
           set -euo pipefail
           scripts/fetch-models
           ls -la models
-          test "$(ls models/*.onnx | wc -l)" -ge 3
+          test -f models/BasicPitchPoly.mlpackage/Manifest.json
+          test -f models/BasicPitchPoly.mlpackage/Data/com.apple.CoreML/weights/weight.bin
+          test -f models/GeneralUser-GS.sf2
 
       - name: Write ASC API key
         env:
@@ -268,7 +270,7 @@ jobs:
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             MARKETING_VERSION=1.0 \
             OMR_REQUIRE_MODELS=1 \
-            archive 2>&1 | tee "$RUNNER_TEMP/archive.log" | grep -E --line-buffered 'error:|warning: models|Bundled ONNX|\*\* ARCHIVE' || true
+            archive 2>&1 | tee "$RUNNER_TEMP/archive.log" | grep -E --line-buffered 'error:|warning: models|Bundled models|\*\* ARCHIVE' || true
           if ! grep -q '\*\* ARCHIVE SUCCEEDED \*\*' "$RUNNER_TEMP/archive.log"; then
             echo "::error::archive failed"
             grep -E -B2 -A8 'error:' "$RUNNER_TEMP/archive.log" | head -300 || true
