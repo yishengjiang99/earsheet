@@ -1,0 +1,29 @@
+Hear it, then read it. AI Music Radar turns what you play, sing or hum into sheet music, right on your iPhone.
+
+Record with the microphone or import an audio file. In seconds you get an engraved score with the tempo, time signature and key worked out for you. Press play to hear it back while every note lights up as it sounds, or switch to the piano roll to check the pitches and rhythm. Then export MIDI, MusicXML or PDF and keep going in MuseScore, Dorico, Sibelius, Finale, Logic, GarageBand or any DAW.
+
+PRIVATE BY DESIGN
+• Transcription runs entirely on your device with an on-device neural network. Your recordings are never uploaded.
+• No account, no sign-in, no ads, no tracking.
+• Works offline: on a plane, in a practice room, in a classroom with no Wi-Fi.
+
+WHAT YOU GET
+• Record from the mic or import an audio file
+• Polyphonic transcription: chords and melodies, not just single notes
+• Engraved staff page plus a piano-roll view
+• Tempo (BPM), meter and key detection
+• Playback that highlights each note as it plays
+• Export MIDI, MusicXML and PDF through the share sheet
+
+MADE FOR
+• Students working out a melody or passage by ear and checking their ear training
+• Teachers turning something played at the piano into a handout in minutes
+• Songwriters capturing an idea as notes before it slips away
+• Cover musicians and arrangers who want a first draft instead of hours of transcribing
+
+TIPS FOR THE BEST RESULTS
+Transcription is most accurate on a single instrument or voice in a quiet room, such as solo piano, guitar, a sung or hummed melody, or one lead line. Full band mixes are harder, and you may want to tidy the score in your notation app. Think of every result as a fast first draft you can edit.
+
+Want to try it first? Open the free browser demo at grepawk.com/music-hear.
+
+Questions or feedback: yisheng.jiang@gmail.com
