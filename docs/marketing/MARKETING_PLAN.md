@@ -69,7 +69,7 @@ Competitor figures below come from App Store US listings, lookups and recent-rev
 
 **Name (≤30):** `AI Music Radar: Sheet Music` (27). Alternatives: `AI Music Radar - Audio to Notes` is 31, too long; `Music Radar: Audio to Notes` (27) if dropping "AI" helps review or community perception.
 
-**Subtitle (≤30), recommended:** `Live audio to notes, on-device` (30)
+**Subtitle (≤30), shipped:** `Audio to Sheet Music & MIDI` (27). This is live in `docs/asc/metadata/en-US/subtitle.txt`. Avoid "live" in store copy: the iOS app transcribes after you stop recording, and only the web demo is real-time.
 Alternatives: `Audio to Sheet Music, Live` (26) · `Hear it. See the notes. Live.` (29) · `Transcribe music to score` (25)
 
 **Keyword field (≤100 chars, comma-separated, no spaces, no words repeated from the name/subtitle):**
