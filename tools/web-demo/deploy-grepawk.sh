@@ -17,6 +17,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 web="$here/../../web"
 
 if [[ "${1:-}" != "--skip-build" ]]; then
+  "$here/fetch-ft-model.sh"
   (cd "$here" && npm ci --silent && node build.mjs)
 fi
 test -f "$web/vendor/lib.js" && test -f "$web/model/model.json" || { echo "web/ not built" >&2; exit 1; }
@@ -26,6 +27,7 @@ rsync -rlptz --delete --chmod=D755,F644 --exclude '.gitignore' --exclude '.nojek
   "$web/" "$HOST:$DEST/"
 
 echo "==> smoke"
-for p in "" app.js quantize.js vendor/lib.js vendor/abcjs-basic-min.js vendor/tfjs-backend-wasm-simd.wasm model/model.json model/group1-shard1of1.bin; do
+ftp=""; [ -f "$web/model-ft/model.json" ] && ftp="model-ft/model.json model-ft/group1-shard1of1.bin model-ft/earsheet-model.json"
+for p in "" app.js quantize.js vendor/lib.js vendor/abcjs-basic-min.js vendor/tfjs-backend-wasm-simd.wasm model/model.json model/group1-shard1of1.bin $ftp; do
   printf '%s  %s\n' "$(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$URL$p")" "$URL$p"
 done

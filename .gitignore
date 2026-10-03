@@ -21,3 +21,4 @@ Packages/HearSheet/.build/
 Packages/SF2Player/.build/
 # Fine-tune runs: tfrecords, SavedModels, metrics (weights stay out of git)
 build/finetune/
+build/model-export/

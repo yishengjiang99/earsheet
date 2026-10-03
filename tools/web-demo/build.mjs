@@ -53,4 +53,24 @@ for (const [f, want] of Object.entries(MODEL_PINS)) {
   copyFileSync(src, join(web, 'model', f));
 }
 copyFileSync(nm('@spotify/basic-pitch/LICENSE'), join(web, 'model', 'LICENSE-basic-pitch.txt'));
+
+// Optional fine-tuned model (weights from a GitHub release, never git): fetch-ft-model.sh
+// unpacks the release's TF.js zip into web/model-ft/; here it must match ft-model.lock.json.
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+const ftLock = JSON.parse(readFileSync(join(here, 'ft-model.lock.json'), 'utf8'));
+const ftDir = join(web, 'model-ft');
+if (ftLock.tag && existsSync(join(ftDir, 'model.json'))) {
+  for (const [f, want] of Object.entries(ftLock.sha256)) {
+    const got = createHash('sha256').update(readFileSync(join(ftDir, f))).digest('hex');
+    if (got !== want) throw new Error(`fine-tuned ${f}: sha256 ${got} != pinned ${want}`);
+  }
+  const { sha256, ...meta } = ftLock;
+  writeFileSync(join(ftDir, 'earsheet-model.json'), JSON.stringify({ ...meta, sha256 }, null, 1));
+  writeFileSync(join(web, 'model-index.json'), JSON.stringify({ ft: true, tag: ftLock.tag }));
+  console.log(`fine-tuned model ${ftLock.tag} verified -> web/model-ft/`);
+} else {
+  rmSync(ftDir, { recursive: true, force: true });
+  writeFileSync(join(web, 'model-index.json'), JSON.stringify({ ft: false }));
+  console.log(ftLock.tag ? `fine-tuned model ${ftLock.tag} not fetched (run fetch-ft-model.sh); stock only` : 'no fine-tuned model pinned; stock only');
+}
 console.log('web/ vendor + model ready');

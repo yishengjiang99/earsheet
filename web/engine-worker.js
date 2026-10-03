@@ -12,7 +12,7 @@ import { tf, tfwasm } from './vendor/lib.js';
 
 const WINDOW = 43844, PAD = 3840, HOP = 256, ROWS = 172, MARGIN = 15, NOTE = 88, CONT = 264;
 const FIRST = ROWS - 2 * MARGIN; // 142 frames from window 0
-let model = null, backend = null;
+let model = null, backend = null, modelUrl = 'model/model.json';
 const sessions = new Map();
 
 function webglRenderer() {
@@ -46,7 +46,7 @@ async function tryBackend(name, auto) {
   }
   if (!(await tf.setBackend(name))) throw new Error(`setBackend(${name}) failed`);
   await tf.ready();
-  if (!model) model = await tf.loadGraphModel(new URL('model/model.json', import.meta.url).href);
+  if (!model) model = await tf.loadGraphModel(new URL(modelUrl, import.meta.url).href);
   const t0 = performance.now();
   await infer(new Float32Array(WINDOW)); // warm-up: compiles kernels, proves all ops run
   return { device, warmupMs: performance.now() - t0 };
@@ -109,6 +109,7 @@ async function pump(s) {
 self.onmessage = async (e) => {
   const m = e.data;
   if (m.t === 'init') {
+    if (m.modelUrl) modelUrl = m.modelUrl;
     const order = m.pref && m.pref !== 'auto' ? [m.pref] : ['webgpu', 'webgl', 'wasm', 'cpu'];
     const failures = [];
     for (const name of order) {

@@ -37,8 +37,34 @@ worker.onmessage = (e) => {
   if (h) h(m);
 };
 let initResolve = null;
-function initEngine(pref) {
-  return new Promise((resolve) => { initResolve = resolve; worker.postMessage({ t: 'init', pref }); });
+function initEngine(pref, modelUrl) {
+  return new Promise((resolve) => { initResolve = resolve; worker.postMessage({ t: 'init', pref, modelUrl }); });
+}
+
+// ------------------------------------------------------------------- models --
+// "stock" is the pinned Spotify model. "ft" exists only when the deploy shipped a
+// fine-tuned model: model-ft/earsheet-model.json then describes it (release tag,
+// sha256 pins, recommended decoder settings). Pick with ?model=stock|ft.
+const MODELS = {
+  stock: { id: 'stock', label: 'Stock: Basic Pitch ICASSP 2022', url: 'model/model.json', onset: 0.5, frame: 0.3, minMs: 128 },
+};
+async function discoverModels() {
+  try {
+    const idx = await fetch('model-index.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+    if (!idx.ft) return;
+    const r = await fetch('model-ft/earsheet-model.json', { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    MODELS.ft = { id: 'ft', label: j.label || 'Fine-tuned', url: 'model-ft/model.json', onset: j.onset ?? 0.5,
+      frame: j.frame ?? 0.3, minMs: j.minMs ?? 128, tag: j.tag, info: j };
+  } catch { /* no fine-tuned model deployed */ }
+}
+function applyModelDefaults(m) {
+  // Per-model recommended decoder settings, unless the URL overrides them.
+  const set = (id, v) => { $(id).value = v; document.querySelector(`output[for=${id}]`).textContent = $(id).value; };
+  if (!QS.has('onset')) set('onset-th', m.onset); else set('onset-th', +QS.get('onset'));
+  if (!QS.has('frame')) set('frame-th', m.frame); else set('frame-th', +QS.get('frame'));
+  if (!QS.has('minMs')) set('min-note', m.minMs); else set('min-note', +QS.get('minMs'));
 }
 
 function startSession(hop, onMsg) {
@@ -461,7 +487,7 @@ function downloadMidi() {
 }
 
 // ------------------------------------------------------------------- wire --
-function wire() {
+async function wire() {
   $('rec-btn').onclick = () => (state.live ? stopLive() : startLive());
   $('file-input').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -485,7 +511,17 @@ function wire() {
   $('backend-select').onchange = (e) => { const p = new URLSearchParams(location.search); p.set('backend', e.target.value); location.search = p.toString(); };
   const canRecord = !!(window.AudioWorkletNode && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   $('backend').textContent = 'initialising…';
-  initEngine(pref).then((m) => {
+  await discoverModels();
+  const want = params.get('model') || 'stock';
+  const model = MODELS[want] || MODELS.stock;
+  state.model = model.id; state.modelTag = model.tag || 'stock';
+  const sel = $('model-select');
+  sel.innerHTML = Object.values(MODELS).map((m) => `<option value="${m.id}">${m.label}</option>`).join('');
+  sel.value = model.id;
+  sel.disabled = Object.keys(MODELS).length < 2;
+  sel.onchange = (e) => { const p = new URLSearchParams(location.search); p.set('model', e.target.value); location.search = p.toString(); };
+  applyModelDefaults(model);
+  initEngine(pref, model.url).then((m) => {
     if (m.t !== 'ready') {
       $('backend').textContent = 'none available';
       state.error = 'no backend: ' + JSON.stringify(m.failures);
@@ -498,7 +534,8 @@ function wire() {
     if (m.failures.length) note += ` · skipped ${m.failures.map((f) => f.name).join(', ')}`;
     $('backend-note').textContent = note;
     $('backend-note').title = m.failures.map((f) => `${f.name}: ${f.err}`).join('\n');
-    $('model-status').textContent = 'Basic Pitch ICASSP 2022 (TF.js, 0.9 MB) ready';
+    $('model-status').textContent = model.id === 'stock' ? 'Basic Pitch ICASSP 2022 (TF.js, 0.9 MB) ready'
+      : `${model.label} (${model.tag || 'fine-tuned'}, same size as stock) ready`;
     $('rec-btn').disabled = !canRecord;
     if (!canRecord) $('rec-btn').title = 'Recording needs AudioWorklet + getUserMedia';
     $('sample-btn').disabled = false;
