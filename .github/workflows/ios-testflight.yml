@@ -34,7 +34,8 @@ jobs:
       ASC_APP_ID: "6818838017"
       # App Store provisioning profile for com.ragnus.pnge signed by the IOS_DISTRIBUTION_P12 cert
       # (Apple Distribution: GrepAwk LLC). Taken from secret IOS_APPSTORE_PROFILE_PNGE_BASE64 if set,
-      # else looked up read-only via the ASC API (active IOS_APP_STORE profile for the bundle id).
+      # else an active IOS_APP_STORE profile for the bundle id is reused via the ASC API, or created
+      # ("AI Music Radar App Store (CI)"; bundle id registered first if needed). Never deletes anything.
       # PROFILE_NAME is exported by the install step.
       BUILD_NUMBER: ${{ github.run_number }}
 
@@ -142,43 +143,80 @@ jobs:
             echo "Using profile from secret IOS_APPSTORE_PROFILE_PNGE_BASE64"
             echo -n "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
           else
-            echo "Looking up an App Store profile for $BUNDLE_ID via the ASC API (read-only)"
+            echo "Finding (or creating) an App Store profile for $BUNDLE_ID via the ASC API"
             python3 - <<'PY'
-          import base64, hashlib, json, os, plistlib, subprocess, time, urllib.request
+          # Idempotent: reuse an ACTIVE IOS_APP_STORE profile for BUNDLE_ID that contains the p12 cert;
+          # otherwise register the bundle id if needed and create one. Only creates; never deletes/revokes.
+          import base64, hashlib, json, os, plistlib, subprocess, time, urllib.error, urllib.request
           import jwt
           p8 = os.environ["P8"].replace("\\n", "\n").strip()
-          now = int(time.time())
-          t = jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": now, "exp": now + 1100,
-                          "aud": "appstoreconnect-v1"}, p8, algorithm="ES256",
-                         headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"].strip()})
-          def get(path):
-              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": "Bearer " + t})
-              with urllib.request.urlopen(req, timeout=60) as r:
-                  return json.loads(r.read().decode() or "{}")
+          def tok():
+              now = int(time.time())
+              return jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": now, "exp": now + 1100,
+                                 "aud": "appstoreconnect-v1"}, p8, algorithm="ES256",
+                                headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"].strip()})
+          def api(method, path, body=None):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, method=method,
+                                           data=json.dumps(body).encode() if body is not None else None,
+                                           headers={"Authorization": "Bearer " + tok(), "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      return json.loads(r.read().decode() or "{}")
+              except urllib.error.HTTPError as e:
+                  raise SystemExit(f"::error::{method} {path} -> {e.code}: {e.read().decode()[:2000]}")
           bid = os.environ["BUNDLE_ID"]
-          ids = [b for b in get(f"/v1/bundleIds?filter[identifier]={bid}&limit=50")["data"] if b["attributes"]["identifier"] == bid]
-          if not ids:
-              raise SystemExit(f"::error::bundle id {bid} is not registered in the Developer portal")
           want = os.environ["CERT_SHA1"].upper()
-          found = None
-          for b in ids:
-              for pr in get(f"/v1/bundleIds/{b['id']}/profiles?limit=200")["data"]:
-                  a = pr["attributes"]
-                  print("profile", a.get("name"), a.get("profileType"), a.get("profileState"), a.get("expirationDate"))
-                  if a.get("profileType") != "IOS_APP_STORE" or a.get("profileState") != "ACTIVE":
-                      continue
+          base_name = os.environ.get("CI_PROFILE_NAME", "AI Music Radar App Store (CI)")
+          def certs_in(raw):
+              xml = subprocess.run(["security", "cms", "-D"], input=raw, capture_output=True, check=True).stdout
+              return [hashlib.sha1(c).hexdigest().upper() for c in plistlib.loads(xml).get("DeveloperCertificates", [])]
+
+          # 1. bundle id (register if missing; the app needs no extra capabilities)
+          ids = [b for b in api("GET", f"/v1/bundleIds?filter[identifier]={bid}&filter[platform]=IOS&limit=50")["data"]
+                 if b["attributes"]["identifier"] == bid]
+          if ids:
+              bundle = ids[0]
+              print("bundle id registered:", bundle["id"])
+          else:
+              bundle = api("POST", "/v1/bundleIds", {"data": {"type": "bundleIds", "attributes": {
+                  "identifier": bid, "name": "AI Music Radar", "platform": "IOS"}}})["data"]
+              print("registered bundle id", bid, bundle["id"])
+
+          # 2. reuse an existing active App Store profile containing the p12 cert
+          found, names = None, set()
+          for pr in api("GET", f"/v1/bundleIds/{bundle['id']}/profiles?limit=200")["data"]:
+              a = pr["attributes"]
+              names.add(a.get("name"))
+              print("profile", a.get("name"), a.get("profileType"), a.get("profileState"), a.get("expirationDate"))
+              if a.get("profileType") == "IOS_APP_STORE" and a.get("profileState") == "ACTIVE":
                   raw = base64.b64decode(a["profileContent"])
-                  xml = subprocess.run(["security", "cms", "-D"], input=raw, capture_output=True, check=True).stdout
-                  certs = [hashlib.sha1(c).hexdigest().upper() for c in plistlib.loads(xml).get("DeveloperCertificates", [])]
-                  if want in certs:
+                  if want in certs_in(raw):
                       found = raw
+                      print("  -> reusing")
                       break
                   print("  (does not contain the p12 distribution cert)")
-              if found:
-                  break
+
+          # 3. otherwise create one for the distribution cert matching the p12
           if not found:
-              raise SystemExit(f"::error::no ACTIVE IOS_APP_STORE profile for {bid} that includes the distribution cert {want}. "
-                               "Create an App Store profile for this bundle id in the Developer portal (or set secret IOS_APPSTORE_PROFILE_PNGE_BASE64).")
+              cert = None
+              for c in api("GET", "/v1/certificates?filter[certificateType]=DISTRIBUTION,IOS_DISTRIBUTION&limit=200")["data"]:
+                  der = base64.b64decode(c["attributes"]["certificateContent"])
+                  if hashlib.sha1(der).hexdigest().upper() == want:
+                      cert = c
+                      break
+              if not cert:
+                  raise SystemExit(f"::error::no DISTRIBUTION certificate in the account matches the p12 (sha1 {want})")
+              print("distribution cert", cert["id"], cert["attributes"].get("name"), "serial", cert["attributes"].get("serialNumber"))
+              name = base_name
+              if name in names:  # a stale/invalid profile already uses the name; profile names must be unique
+                  name = f"{base_name} {cert['attributes'].get('serialNumber', cert['id'])[-6:]} {time.strftime('%Y%m%d')}"
+              pr = api("POST", "/v1/profiles", {"data": {"type": "profiles",
+                  "attributes": {"name": name, "profileType": "IOS_APP_STORE"},
+                  "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": bundle["id"]}},
+                                    "certificates": {"data": [{"type": "certificates", "id": cert["id"]}]}}}})["data"]
+              print("created profile", pr["id"], pr["attributes"].get("name"))
+              found = base64.b64decode(pr["attributes"]["profileContent"])
+              assert want in certs_in(found), "created profile does not contain the p12 cert"
           open(os.path.join(os.environ["RUNNER_TEMP"], "appstore.mobileprovision"), "wb").write(found)
           PY
           fi
