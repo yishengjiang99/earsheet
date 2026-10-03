@@ -38,3 +38,6 @@ jobs:
       - name: Headless transcription test (WASM + WebGL)
         working-directory: tools/web-demo
         run: node test.mjs --backends=wasm,webgl --chrome="$(command -v google-chrome)"
+      - name: Live mic streaming test (fake capture device, WASM)
+        working-directory: tools/web-demo
+        run: node test-live.mjs --backend=wasm --cases=twinkle-melody,ode-to-joy --chrome="$(command -v google-chrome)"

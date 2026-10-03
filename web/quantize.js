@@ -210,14 +210,19 @@ function voiceToAbc(notes, bar16, total16, fifths) {
   return out.trim();
 }
 
-export function toAbc(score, { maxBars = 24, title = 'Transcription' } = {}) {
+export function toAbc(score, { maxBars = 24, lastBars = 0 } = {}) {
   const m = METERS[score.meter];
   const fifths = keyFifths(score.key);
   if (!score.notes.length) return null;
   const end = Math.max(...score.notes.map((n) => n.start16 + n.dur16));
-  const bars = Math.min(maxBars, Math.max(1, Math.ceil(end / m.bar16)));
+  const allBars = Math.max(1, Math.ceil(end / m.bar16));
+  // lastBars: live view of the most recent bars; otherwise the first maxBars.
+  const firstBar = lastBars ? Math.max(0, allBars - lastBars) : 0;
+  const bars = lastBars ? allBars - firstBar : Math.min(maxBars, allBars);
+  const off16 = firstBar * m.bar16;
   const total16 = bars * m.bar16;
-  const visible = score.notes.filter((n) => n.start16 < total16).map((n) => ({ ...n, dur16: Math.min(n.dur16, total16 - n.start16) }));
+  const visible = score.notes.filter((n) => n.start16 >= off16 && n.start16 - off16 < total16)
+    .map((n) => ({ ...n, start16: n.start16 - off16, dur16: Math.min(n.dur16, total16 - (n.start16 - off16)) }));
   const treble = visible.filter((n) => n.midi >= 60);
   const bass = visible.filter((n) => n.midi < 60);
   const unitNote = m.unit === 8 ? '1/16' : '1/16';
@@ -226,7 +231,7 @@ export function toAbc(score, { maxBars = 24, title = 'Transcription' } = {}) {
     '%%score {RH LH}', 'V:RH clef=treble', 'V:LH clef=bass', `K:${keyName(score.key)}`,
     '[V:RH] ' + voiceToAbc(treble, m.bar16, total16, fifths),
     '[V:LH] ' + voiceToAbc(bass, m.bar16, total16, fifths),
-  ].join('\n') + (bars < Math.ceil(end / m.bar16) ? '\n' : '');
+  ].join('\n');
 }
 
 export const NOTE_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];

@@ -11,7 +11,7 @@
 <body>
 <header>
   <h1>EarSheet <span class="muted">web demo</span></h1>
-  <p class="lede">Record or upload music and get notes back. The same Basic Pitch model the EarSheet iOS app uses runs here on your device through TensorFlow.js. Your audio never leaves the browser.</p>
+  <p class="lede">Play into the mic and watch the notes appear as you play, or upload a recording. The same Basic Pitch model the EarSheet iOS app uses runs here on your device through TensorFlow.js. Your audio never leaves the browser.</p>
 </header>
 
 <main>
@@ -34,11 +34,11 @@
   <section class="card" id="input">
     <h2>1. Audio</h2>
     <div class="row">
-      <button id="rec-btn" disabled>● Record</button>
-      <label class="button" for="file-input">Upload audio…</label>
+      <button id="rec-btn" disabled>● Record (live)</button>
+      <label class="button" id="file-label" for="file-input">Upload audio…</label>
       <input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm" hidden>
       <button id="sample-btn" disabled>Try a sample (C major)</button>
-      <span id="rec-time" class="muted"></span>
+      <span id="live-badge" class="live-badge" hidden>● LIVE</span> <span id="rec-time" class="muted"></span>
     </div>
     <div id="audio-info" class="muted small"></div>
     <audio id="audio-el" controls hidden></audio>
@@ -83,9 +83,9 @@
   <section class="card small muted" id="about">
     <h2>How it works</h2>
     <ol>
-      <li>Audio is decoded and resampled to 22,050 Hz mono with an <code>OfflineAudioContext</code>.</li>
-      <li>It is cut into 2-second windows (43,844 samples, 30-frame overlap) and run through Spotify's <a href="https://github.com/spotify/basic-pitch">Basic Pitch</a> (ICASSP 2022, ~0.9 MB TF.js graph) on WebGPU, WebGL or WASM.</li>
-      <li>The note, onset and contour heads are decoded into notes with Basic Pitch's own JS port of <code>note_creation.py</code>.</li>
+      <li>Mic audio is captured by an <code>AudioWorklet</code> in a 22,050 Hz <code>AudioContext</code> and streamed to a Web Worker; uploads are resampled with an <code>OfflineAudioContext</code>.</li>
+      <li>The worker runs each 2-second window (43,844 samples) as soon as it fills, every ~0.5 s live (~0.8 s for files), keeping only the newest frames of each window, through Spotify's <a href="https://github.com/spotify/basic-pitch">Basic Pitch</a> (ICASSP 2022, ~0.9 MB TF.js graph) on WebGPU, WebGL or WASM.</li>
+      <li>The note and onset heads are decoded into notes with Basic Pitch's own JS port of <code>note_creation.py</code>; live, the latest ~15 s are re-decoded after every window and older notes are frozen.</li>
       <li>A JS port of EarSheet's quantizer estimates tempo, meter and key and snaps to 16ths for the staff (rendered with abcjs).</li>
     </ol>
     <p>Model and decoder: © Spotify AB, Apache-2.0. TensorFlow.js: Apache-2.0. abcjs and @tonejs/midi: MIT. Source: <code>web/</code> in the EarSheet repo.</p>

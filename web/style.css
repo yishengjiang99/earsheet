@@ -28,3 +28,6 @@ summary { cursor: pointer; color: var(--muted); }
 a { color: var(--accent); }
 code { background:#232733; padding:0 4px; border-radius:4px; }
 #backend.ok { color: var(--ok); }
+.live-badge { color:#fff; background:#c33; border-radius:4px; padding:1px 7px; font-size:12px; font-weight:600; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity:.45; } }
+label.button.disabled { opacity:.45; pointer-events:none; }

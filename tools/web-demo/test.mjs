@@ -36,7 +36,7 @@ function render(events, seconds) {
   for (let i = 0; i < n; i++) { const v = Math.round(Math.max(-1, Math.min(1, x[i])) * 32767); buf.writeInt16LE(v, 44 + i * 4); buf.writeInt16LE(v, 46 + i * 4); }
   return buf;
 }
-const CASES = {
+export const CASES = {
   'c-major-triad': { events: [[60, 0.5, 2.0], [64, 0.5, 2.0], [67, 0.5, 2.0]], seconds: 3 },
   'twinkle-melody': { events: [60, 60, 67, 67, 69, 69, 67].map((m, i) => [m, 0.3 + i * 0.5, i === 6 ? 0.95 : 0.45]), seconds: 4.5 },
   'two-hands': { events: [[48, 0.3, 1.9], [64, 0.3, 0.45], [67, 0.8, 0.45], [72, 1.3, 0.45], [67, 1.8, 0.45], [43, 2.3, 1.9], [62, 2.3, 0.45], [65, 2.8, 0.45], [71, 3.3, 0.9]], seconds: 4.8 },
