@@ -82,7 +82,8 @@ struct ExportView: View {
     private var pdfScore: QuantizedScore {
         guard !proStore.isPro else { return take.score }
         var s = take.score
-        s.notes = s.notes.filter { $0.onset < 30 }
+        let cutoff16 = Int(30.0 / s.secondsPer16th)
+        s.notes = s.notes.filter { $0.start16 < cutoff16 }
         return s
     }
 
