@@ -5,12 +5,15 @@ import HearSheet
 import SF2Player
 
 /// A saved transcription: a quantized score plus metadata.
-struct Take: Identifiable, Codable, Equatable {
+struct Take: Identifiable, Codable, Hashable {
     var id: UUID
     var title: String
     var createdAt: Date
     var score: QuantizedScore
     var isSample: Bool
+
+    // Navigation value: hash by identity (equal takes always share an id).
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     var durationSeconds: Double {
         guard let last = score.notes.max(by: { $0.start16 < $1.start16 }) else { return 0 }
