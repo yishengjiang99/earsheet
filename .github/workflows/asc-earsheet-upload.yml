@@ -1,0 +1,49 @@
+name: ASC EarSheet upload listing
+
+# Listing prep for EarSheet: Music to Sheet (com.ragnus.earsheet) version 1.0: metadata, URLs,
+# categories, copyright, App Review contact, age rating, export compliance, attach build,
+# screenshots, then a read-only verification. NEVER submits for review
+# (that is asc-submit-app-store.yml, run by hand).
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: CFBundleVersion to attach to the version (export compliance cleared too)
+        required: true
+        type: string
+        default: "15"
+      screenshots:
+        description: Replace screenshots from docs/asc/screenshots/en-US
+        type: boolean
+        default: true
+      verify_only:
+        description: Read-only verification, no writes
+        type: boolean
+        default: false
+
+concurrency:
+  group: asc-music-reader-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload listing to App Store Connect and verify
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          BUNDLE_ID: com.ragnus.earsheet
+          VERSION_STRING: "1.0"
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          UPLOAD_SCREENSHOTS: ${{ inputs.screenshots }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+        run: |
+          set -euo pipefail
+          pip install -q PyJWT cryptography requests
+          python3 scripts/asc/upload_music_reader_listing.py

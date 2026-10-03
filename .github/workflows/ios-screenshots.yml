@@ -1,0 +1,78 @@
+name: iOS simulator screenshots
+
+# Builds the app for the simulator and captures real screenshots at the App Store sizes (iPhone
+# 6.9" 1320x2868, iPad 13" 2064x2752): launch, then Result (demo scan), Player (sweden sample,
+# playing), Library and Settings via Debug-only launch args. Artifacts only; copy into docs/asc/screenshots/.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_26.0.app /Applications/Xcode_26.app /Applications/Xcode_16.4.app /Applications/Xcode.app; do
+            if [[ -d "$app" ]]; then sudo xcode-select -s "$app"; break; fi
+          done
+          xcodebuild -version
+
+      - name: Fetch ONNX models (bundled by the build; sha256-pinned)
+        run: scripts/fetch-models
+
+      - name: Build for simulator
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project EarSheet.xcodeproj -scheme EarSheet -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/build.log" 2>&1 || { grep -E "error:" -A3 "$RUNNER_TEMP/build.log" | head -120; tail -40 "$RUNNER_TEMP/build.log"; exit 1; }
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -name 'EarSheet.app' -maxdepth 3 | head -1)
+          test -d "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Capture screenshots
+        run: |
+          set -euo pipefail
+          mkdir -p shots
+          xcrun simctl list devicetypes | grep -E 'iPhone 1[6-9] Pro Max|iPad Pro 13' || true
+          xcrun simctl list runtimes
+          RT=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x["platform"]=="iOS" and x["isAvailable"]]; print(sorted(r,key=lambda x:[int(n) for n in x["version"].split(".")])[-1]["identifier"])')
+          shoot() {
+            local label="$1" pattern="$2"
+            local dt
+            dt=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys,re; d=[x for x in json.load(sys.stdin)['devicetypes'] if re.search(r'''$pattern''', x['name'])]; print(sorted(d,key=lambda x:x['name'])[-1]['identifier'])")
+            local id
+            id=$(xcrun simctl create "shot-$label" "$dt" "$RT")
+            xcrun simctl boot "$id"
+            xcrun simctl bootstatus "$id" -b
+            xcrun simctl status_bar "$id" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+            xcrun simctl install "$id" "$APP"
+            xcrun simctl launch "$id" com.ragnus.earsheet
+            sleep 8
+            xcrun simctl io "$id" screenshot "shots/${label}-01-launch.png"
+            sips -g pixelWidth -g pixelHeight "shots/${label}-01-launch.png"
+            # Debug-only deep links (Sources/App/ScreenshotDemo.swift): -OMRScreenshot <route>
+            local n=2
+            for route in result player library settings; do
+              xcrun simctl terminate "$id" com.ragnus.earsheet || true
+              xcrun simctl launch "$id" com.ragnus.earsheet -OMRScreenshot "$route"
+              sleep 10
+              xcrun simctl io "$id" screenshot "shots/${label}-0${n}-${route}.png"
+              n=$((n + 1))
+            done
+            xcrun simctl shutdown "$id" || true
+          }
+          shoot iphone-69 'iPhone 1[6-9] Pro Max'
+          shoot ipad-13 'iPad Pro 13'
+          ls -la shots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator-screenshots
+          path: shots/

@@ -1,0 +1,341 @@
+name: iOS TestFlight
+
+# Archive EarSheet (EarSheet: Music to Sheet, com.ragnus.earsheet), bundle the pinned homr ONNX
+# models (scripts/fetch-models, never committed), sign with the App Store profile, upload with
+# altool. The job FAILS if altool reports any error (no false greens).
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: What to Test notes (optional)
+        required: false
+        default: Early build
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build-upload:
+    name: Archive and upload
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ARCHIVE_PATH: ${{ github.workspace }}/build/EarSheet.xcarchive
+      EXPORT_PATH: ${{ github.workspace }}/build/export
+      TEAM_ID: 83D36RPMUM
+      BUNDLE_ID: com.ragnus.earsheet
+      SCHEME: EarSheet
+      PROJECT: EarSheet.xcodeproj
+      # App Store provisioning profile for com.ragnus.earsheet (cert YXDKHJC7J9, Apple Distribution: GrepAwk LLC)
+      PROFILE_NAME: EarSheet Music to Sheet App Store
+      BUILD_NUMBER: ${{ github.run_number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          # Prefer Xcode 26 (ASC SDK requirement as of 2026); fall back to 16.x
+          for app in /Applications/Xcode_26.0.app /Applications/Xcode_26.app /Applications/Xcode-26.app /Applications/Xcode_16.4.app /Applications/Xcode_16.3.app /Applications/Xcode_16.2.app /Applications/Xcode_16.app /Applications/Xcode.app; do
+            if [[ -d "$app" ]]; then
+              sudo xcode-select -s "$app"
+              break
+            fi
+          done
+          xcodebuild -version
+          ls /Applications | grep -i Xcode || true
+
+      - name: Cache ONNX models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: homr-models-${{ hashFiles('models.lock') }}
+
+      - name: Fetch ONNX models (sha256-pinned)
+        run: |
+          set -euo pipefail
+          scripts/fetch-models
+          ls -la models
+          test "$(ls models/*.onnx | wc -l)" -ge 3
+
+      - name: Write ASC API key
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "${APP_STORE_CONNECT_KEY_ID:-}"
+          test -n "${APP_STORE_CONNECT_ISSUER_ID:-}"
+          test -n "${P8:-}"
+          ASC_KEY_PATH="$RUNNER_TEMP/private_keys/AuthKey.p8"
+          mkdir -p "$(dirname "$ASC_KEY_PATH")"
+          printf '%s\n' "$P8" > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          chmod 600 "$HOME/.appstoreconnect/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+
+      - name: Install Distribution cert + App Store profile
+        env:
+          P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "${P12_BASE64:-}" && test -n "${P12_PASSWORD:-}" && test -n "${PROFILE_BASE64:-}"
+          CERT_PATH=$RUNNER_TEMP/dist.p12
+          PROFILE_PATH=$RUNNER_TEMP/appstore.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo -n "$P12_BASE64" | base64 --decode > "$CERT_PATH"
+          echo -n "$PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychain -d user | sed s/\"//g)
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          UUID=$(security cms -D -i "$PROFILE_PATH" | plutil -extract UUID raw -)
+          NAME=$(security cms -D -i "$PROFILE_PATH" | plutil -extract Name raw -)
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$UUID.mobileprovision"
+          echo "Installed profile UUID=$UUID Name=$NAME"
+          test "$NAME" = "$PROFILE_NAME"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Pin manual signing on the app target (CI only)
+        run: |
+          set -euo pipefail
+          # Only the app target gets the profile; SPM package / resource-bundle targets must not
+          # inherit PROVISIONING_PROFILE_SPECIFIER (command-line overrides would apply to all targets).
+          python3 - <<'PY'
+          import os, re
+          p = "EarSheet.xcodeproj/project.pbxproj"
+          s = open(p).read()
+          anchor = "\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.ragnus.earsheet;\n"
+          n = s.count(anchor)
+          assert n == 2, f"expected 2 app configs, found {n}"
+          add = (
+            anchor
+            + '\t\t\t\t"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Distribution";\n'
+            + f'\t\t\t\t"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "{os.environ["PROFILE_NAME"]}";\n'
+          )
+          s = s.replace(anchor, add)
+          s = s.replace("CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Manual;")
+          open(p, "w").write(s)
+          PY
+          git diff --stat
+
+      - name: Verify Xcode project
+        run: |
+          set -euo pipefail
+          test -f "$PROJECT/project.pbxproj"
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Write ExportOptions.plist
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>teamID</key>
+            <string>${TEAM_ID}</string>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          sed -i '' 's/^          //' "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -lint "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Resolve Swift packages
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project "$PROJECT" -scheme "$SCHEME"
+
+      - name: Archive
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$ARCHIVE_PATH")"
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            MARKETING_VERSION=1.0 \
+            OMR_REQUIRE_MODELS=1 \
+            archive 2>&1 | tee "$RUNNER_TEMP/archive.log" | grep -E --line-buffered 'error:|warning: models|Bundled ONNX|\*\* ARCHIVE' || true
+          if ! grep -q '\*\* ARCHIVE SUCCEEDED \*\*' "$RUNNER_TEMP/archive.log"; then
+            echo "::error::archive failed"
+            grep -E -B2 -A8 'error:' "$RUNNER_TEMP/archive.log" | head -300 || true
+            tail -80 "$RUNNER_TEMP/archive.log"
+            exit 1
+          fi
+          test -d "$ARCHIVE_PATH"
+          APP="$ARCHIVE_PATH/Products/Applications/EarSheet.app"
+          ls -la "$APP" "$APP/models"
+          du -sh "$APP"
+          plutil -p "$APP/Info.plist"
+
+      - name: Fix embedded frameworks (ITMS-90208)
+        run: |
+          set -euo pipefail
+          # Build 1/2 were rejected: "ITMS-90208 EarSheet.app/Frameworks/onnxruntime.framework does not
+          # support the minimum OS Version specified in the Info.plist". The SPM-built onnxruntime.framework
+          # (dynamic) carries a MinimumOSVersion that disagrees with its Mach-O LC_BUILD_VERSION minos.
+          # Align every embedded framework's MinimumOSVersion with the app's; drop static ones.
+          # exportArchive re-signs everything afterwards.
+          APP="$ARCHIVE_PATH/Products/Applications/EarSheet.app"
+          APP_MIN=$(plutil -extract MinimumOSVersion raw "$APP/Info.plist")
+          echo "app MinimumOSVersion=$APP_MIN"
+          shopt -s nullglob
+          for fw in "$APP"/Frameworks/*.framework; do
+            name=$(basename "$fw" .framework); bin="$fw/$name"; plist="$fw/Info.plist"
+            desc=$(file -b "$bin" || true)
+            echo "== $name: $desc"
+            xcrun vtool -show-build "$bin" 2>/dev/null | grep -E 'platform|minos|sdk' || true
+            echo "plist MinimumOSVersion: $(plutil -extract MinimumOSVersion raw "$plist" 2>/dev/null || echo MISSING)"
+            if echo "$desc" | grep -qi 'ar archive'; then
+              echo "::notice::removing static framework $name"; rm -rf "$fw"; continue
+            fi
+            BIN_MIN=$(xcrun vtool -show-build "$bin" 2>/dev/null | awk '/minos/ {print $2; exit}')
+            WANT="$APP_MIN"
+            if [ -n "$BIN_MIN" ] && [ "$(printf '%s\n%s\n' "$BIN_MIN" "$APP_MIN" | sort -V | tail -1)" = "$BIN_MIN" ]; then WANT="$BIN_MIN"; fi
+            plutil -replace MinimumOSVersion -string "$WANT" "$plist"
+            echo "set $name MinimumOSVersion=$WANT (binary minos=${BIN_MIN:-?})"
+          done
+
+      - name: Upload archive log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-log-${{ github.run_number }}
+          path: ${{ runner.temp }}/archive.log
+          if-no-files-found: ignore
+
+      - name: Export IPA
+        run: |
+          set -euo pipefail
+          mkdir -p "$EXPORT_PATH"
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          ls -la "$EXPORT_PATH"
+          test -n "$(find "$EXPORT_PATH" -name '*.ipa' | head -1)"
+
+      - name: Validate with App Store Connect
+        run: |
+          set -euo pipefail
+          IPA=$(find "$EXPORT_PATH" -name '*.ipa' | head -1)
+          set +e
+          xcrun altool --validate-app --type ios --file "$IPA" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" > "$RUNNER_TEMP/altool-validate.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/altool-validate.log"
+          if [ "$rc" -ne 0 ] || grep -Eiq 'Validation failed|ERROR ITMS-|ERROR:\s*\[altool|error: ' "$RUNNER_TEMP/altool-validate.log"; then
+            echo "::error::altool validation failed (rc=$rc)"
+            exit 1
+          fi
+
+      - name: Upload to TestFlight
+        run: |
+          set -euo pipefail
+          IPA=$(find "$EXPORT_PATH" -name '*.ipa' | head -1)
+          echo "Uploading $IPA (build $BUILD_NUMBER)"
+          set +e
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" > "$RUNNER_TEMP/altool-upload.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/altool-upload.log"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::altool exited $rc"
+            exit 1
+          fi
+          # altool can exit 0 while rejecting the package: fail hard on any validation error text.
+          if grep -Eiq 'UPLOAD FAILED|Validation failed|STATE_ERROR\.VALIDATION_ERROR|Failed to upload package|ERROR:\s*\[altool|ERROR ITMS-|error: ' "$RUNNER_TEMP/altool-upload.log"; then
+            echo "::error::altool upload/validation failed (see log)"
+            exit 1
+          fi
+          if ! grep -Eiq 'UPLOAD SUCCEEDED|No errors uploading|Delivery UUID|The package was successfully uploaded' "$RUNNER_TEMP/altool-upload.log"; then
+            echo "::error::altool did not report success"
+            exit 1
+          fi
+
+      - name: Wait for ASC processing (fail unless VALID)
+        env:
+          P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          pip3 install -q --break-system-packages PyJWT cryptography 2>/dev/null || pip3 install -q PyJWT cryptography
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          import jwt
+          p8 = os.environ["P8"].replace("\\n", "\n").strip()
+          def tok():
+              now = int(time.time())
+              return jwt.encode({"iss": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(), "iat": now, "exp": now + 1100,
+                                 "aud": "appstoreconnect-v1"}, p8, algorithm="ES256",
+                                headers={"kid": os.environ["APP_STORE_CONNECT_KEY_ID"].strip()})
+          def get(path):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, headers={"Authorization": "Bearer " + tok()})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.loads(r.read().decode() or "{}")
+          app = get(f"/v1/apps?filter[bundleId]={os.environ['BUNDLE_ID']}")["data"][0]["id"]
+          want = os.environ["BUILD_NUMBER"]
+          deadline = time.time() + 40 * 60
+          state = None
+          while time.time() < deadline:
+              d = get(f"/v1/builds?filter[app]={app}&filter[version]={want}&filter[preReleaseVersion.version]=1.0&limit=5")
+              if d.get("data"):
+                  state = d["data"][0]["attributes"]["processingState"]
+                  print(time.strftime("%H:%M:%S"), "build", want, state, flush=True)
+                  if state in ("VALID", "INVALID", "FAILED"):
+                      break
+              else:
+                  print(time.strftime("%H:%M:%S"), "build", want, "not visible yet", flush=True)
+              time.sleep(30)
+          if state != "VALID":
+              raise SystemExit(f"::error::build {want} processing state {state!r} (check the ASC 'issues' email for ITMS codes)")
+          PY
+
+      - name: Summary
+        if: success()
+        env:
+          NOTES: ${{ github.event.inputs.notes }}
+        run: |
+          {
+            echo "### TestFlight upload"
+            echo "- Bundle: \`$BUNDLE_ID\`"
+            echo "- Build: \`$BUILD_NUMBER\` (version 1.0)"
+            echo "- Notes: $NOTES"
+            echo "- Processing takes a few minutes; then run *ASC assign Internal Testing* with this build number."
+          } >> "$GITHUB_STEP_SUMMARY"

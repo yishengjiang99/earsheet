@@ -1,0 +1,84 @@
+# OMRHomrIOS CoreML EP diagnostics (manual): SegNet CoreML vs CPU EP per configuration + CoreML cache tests,
+# on macOS (swift test) and on the iOS simulator (xcodebuild test of the package). Prints `[segnet-diag]` lines.
+name: CoreML diag
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "ORT verbose log (node partitioning) for the app-default SegNet variant"
+        type: boolean
+        default: false
+
+jobs:
+  macos:
+    name: macOS swift test (SegNet + cache)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('models.lock') }}
+      - run: scripts/fetch-models && ls -l models
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: swift test (SegNetCoreMLDiagTests, CoreMLModelCacheTests)
+        env:
+          OMR_MODELS_DIR: ${{ github.workspace }}/models
+          OMR_SEGNET_DIAG: "1"
+          OMR_SEGNET_DIAG_VERBOSE: ${{ inputs.verbose && '1' || '0' }}
+        run: |
+          set -o pipefail
+          sysctl -n machdep.cpu.brand_string || true
+          swift test --package-path Packages/omr-homr-ios --filter 'SegNetCoreMLDiagTests|CoreMLModelCacheTests' 2>&1 | tee "$RUNNER_TEMP/diag.log"
+      - name: Summary
+        if: always()
+        run: grep -E "\[segnet-diag\]|\[coreml-cache\]|CoreMLExecutionProvider::GetCapability|Test Case .*(passed|failed)|error:" "$RUNNER_TEMP/diag.log" | cut -c1-1200 || true
+
+  simulator:
+    name: iOS simulator xcodebuild test (SegNet + cache)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('models.lock') }}
+      - run: scripts/fetch-models && ls -l models
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Resolve simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          name=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          d = json.load(sys.stdin)["devices"]
+          ios = [r for r in d if ".SimRuntime.iOS-" in r and any("iPhone" in x["name"] for x in d[r])]
+          rt = max(ios, key=lambda r: [int(n) for n in re.findall(r"\d+", r.split("iOS-")[1])])
+          prefer = ["iPhone 17", "iPhone 16", "iPhone 16 Pro", "iPhone 15"]
+          names = [x["name"] for x in d[rt] if "iPhone" in x["name"]]
+          print(next((p for p in prefer if p in names), names[0]))
+          ')
+          echo "destination=platform=iOS Simulator,name=$name,OS=latest" >> "$GITHUB_OUTPUT"
+      - name: xcodebuild test (package scheme)
+        working-directory: Packages/omr-homr-ios
+        env:
+          TEST_RUNNER_OMR_MODELS_DIR: ${{ github.workspace }}/models
+          TEST_RUNNER_OMR_SEGNET_DIAG: "1"
+          TEST_RUNNER_OMR_SEGNET_DIAG_VERBOSE: ${{ inputs.verbose && '1' || '0' }}
+        run: |
+          set -o pipefail
+          xcodebuild -list || true
+          xcodebuild test \
+            -scheme HearSheet-Package \
+            -destination "${{ steps.sim.outputs.destination }}" \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/sim.log"
+      - name: Summary
+        if: always()
+        run: grep -E "\[segnet-diag\]|\[coreml-cache\]|CoreMLExecutionProvider::GetCapability|Test Case .*(passed|failed)|error:" "$RUNNER_TEMP/sim.log" | cut -c1-1200 || true

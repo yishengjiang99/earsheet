@@ -1,0 +1,132 @@
+# iOS simulator build + app tests (incl. Gate-1 CoreML: Tests/Gate1StaffTokenMatchTests.swift).
+name: iOS Simulator
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # App Store listing, docs and ASC-only workflows/scripts are not app inputs (the app bundles
+      # fixtures/, Sources/, Packages/, never docs/). fixtures/samples/ode-to-joy.jpg IS bundled.
+      - "docs/**"
+      - "**/*.md"
+      - "scripts/asc/**"
+      - ".github/workflows/asc-*.yml"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "scripts/asc/**"
+      - ".github/workflows/asc-*.yml"
+  workflow_dispatch:
+    inputs:
+      oracle_pages:
+        description: "Also parse all 8 other homr oracle pages on the app path (~50 s each in Debug)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-sim-${{ github.ref }}
+  # main gets frequent pushes: let an in-progress main run finish (newer pushes queue behind it).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: EarSheetTests (simulator)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-${{ hashFiles('models.lock') }}
+
+      - name: Fetch models (idempotent, SHA-256 verified)
+        run: scripts/fetch-models && ls -l models
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Xcode info
+        run: |
+          xcodebuild -version
+          xcodebuild -list -project EarSheet.xcodeproj
+
+      - name: Resolve simulator (newest iOS runtime, first iPhone)
+        id: sim
+        run: |
+          set -euo pipefail
+          name=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          d = json.load(sys.stdin)["devices"]
+          ios = [r for r in d if ".SimRuntime.iOS-" in r and any("iPhone" in x["name"] for x in d[r])]
+          if not ios: sys.exit("no iOS runtime with an iPhone simulator")
+          rt = max(ios, key=lambda r: [int(n) for n in re.findall(r"\d+", r.split("iOS-")[1])])
+          prefer = ["iPhone 17", "iPhone 16", "iPhone 16 Pro", "iPhone 15"]
+          names = [x["name"] for x in d[rt] if "iPhone" in x["name"]]
+          print(next((p for p in prefer if p in names), names[0]))
+          ')
+          echo "Using simulator: $name"
+          echo "destination=platform=iOS Simulator,name=$name,OS=latest" >> "$GITHUB_OUTPUT"
+
+      - name: xcodebuild test
+        env:
+          # xcodebuild strips TEST_RUNNER_ and forwards to the simulator test process.
+          TEST_RUNNER_OMR_MODELS_DIR: ${{ github.workspace }}/models
+          TEST_RUNNER_OMR_ORACLE_PAGES: ${{ inputs.oracle_pages && '1' || '0' }}
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project EarSheet.xcodeproj \
+            -scheme EarSheet \
+            -only-testing:EarSheetTests/SmokeTests \
+            -destination "${{ steps.sim.outputs.destination }}" \
+            -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: HearSheet package tests (macOS)
+        if: always()
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/HearSheet 2>&1 | tee "$RUNNER_TEMP/hearsheet.log"
+
+      - name: SF2Player package tests (macOS, gbk parity)
+        if: always()
+        continue-on-error: true
+        env:
+          SF2PLAYER_SF2: ${{ github.workspace }}/models/GeneralUser-GS.sf2
+        run: |
+          set -o pipefail
+          if [ ! -d Packages/SF2Player ]; then echo "SF2Player not vendored yet"; exit 0; fi
+          swift test --package-path Packages/SF2Player 2>&1 | tee "$RUNNER_TEMP/sf2player.log"
+
+      - name: Gate-1 + warmup + page parse summary
+        if: always()
+        run: |
+          grep -E "Gate1StaffTokenMatchTests|Gate-1|ModelWarmupTests|Warmup:|PageRecognitionServiceTests|Gray8ImageTests|PageParse|OraclePages:|Gray8 parity|SegNetDiag|\[warmup\]|\[sf2\]|SF2PlayerAppTests|Build6PrepTests|SegNetSelfTest|coreml cache|Bundled ONNX|models not bundled" "$RUNNER_TEMP/xcodebuild.log" || echo "no Gate-1 / warmup lines"
+          if grep -F "should not be called on the main thread" "$RUNNER_TEMP/xcodebuild.log"; then
+            echo "::warning::CoreML main-thread warning present"
+          else
+            echo "no CoreML main-thread warning"
+          fi
+
+      - name: App bundle size
+        if: always()
+        run: |
+          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Debug-iphonesimulator/EarSheet.app' -maxdepth 6 | head -1)
+          if [ -n "$APP" ]; then du -sh "$APP" "$APP/models" "$APP/EarSheet" 2>/dev/null; ls -l "$APP/models" 2>/dev/null; fi
+
+      - name: Upload xcresult
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EarSheet-xcresult
+          path: |
+            ${{ runner.temp }}/EarSheet.xcresult
+            ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
