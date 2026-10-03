@@ -1,7 +1,7 @@
 # Basic Pitch fine-tune experiments
 
 <!-- status -->
-**Status (2026-10-03 11:25 PT):** E5 probes (onset positive weight 0.1/0.03/0.3, 1 epoch each)
+**Current status (2026-10-03 11:30 PT):** E5 probes running (onset pos weight 0.3); pw 0.03 beat stock on mixed val (0.813 vs 0.804). Full history: Status log at the bottom (append-only).
 <!-- /status -->
 
 Goal: the best polyphonic transcription model for the web demo and the iOS app that is
@@ -44,6 +44,8 @@ Columns are onset-F1 on held-out sets. "mixed val" = synth val + GuitarSet val +
 | E0t | stock, onset threshold 0.7 / frame 0.3 (tuned on mixed val) | - | **0.892** | **0.922** | **0.715** | **0.822** | **0.701** | (E4 run) | same | free win: higher onset threshold cuts false onsets everywhere (P 0.79 to 0.84 on gugs, 0.77 to 0.82 on GuitarSet) |
 | E2 | fixed trainer (plain BCE, BN frozen, warmup+cosine 1e-4, gain/EQ/reverb/noise aug), 400 GUGS piano etudes | 0.673 (ep1) / 0.673 / 0.666 | (kept stock) | | | | | | | early stop at epoch 3, never beat stock 0.804, stock kept. A side check of the epoch-2 weights: synth val 0.827 (0.916 at tuned thresholds) but MAESTRO val fell from about 0.70 to 0.52. Synthetic-piano-only fine-tuning overfits the renderer timbre and hurts real piano |
 | E4 | E2 trainer + all data: 400 GUGS + 700 GM multi-instrument (4 SF2s) + 300 piano (Salamander, Upright KW, MuseScore) + 150 guitar (Spanish Classical) etudes + real GuitarSet p00-03 (320 x 30 s), MAESTRO 35 train pieces (206), SMD train works (438); lr 3e-5 | 0.760 (ep1), 0.721 (ep2) | | | | | | | | stopped at epoch 2 (falling). **Root cause for E2/E4: plain BCE collapses the onset head.** Max onset posterior fell from about 0.97 (stock) to 0.52 (E2) / 0.79 (E4), so notes only come from inferred onsets and recall drops. The Basic Pitch paper trains onsets with class-balanced BCE; that is now the default again (`--onset-loss weighted`) |
+| E4b | E4 + class-balanced onset loss (pos weight 0.95) | 0.384 / 0.272 / 0.262 | | | | | | | | onsets everywhere (P 0.19-0.30). Plain BCE is about pos weight 0.001 (positives are about 0.1% of onset cells), and 0.95 is far too high |
+| E5 probes | all data, lr 3e-5, 1 epoch x 300 steps, onset pos weight 0.1 / **0.03** / 0.3 | 0.747 / **0.813** / (running) | | | | | | | | pw 0.03 is the first setting to beat stock on mixed val (0.813 vs 0.804) |
 | E1 | original script defaults (2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes) | synth val only: 0.670 (best epoch 0.727) vs stock 0.879 | | | | | | | | precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept |
 
 ## Decoder finding (no training needed)
@@ -85,3 +87,23 @@ Data sources and licenses: [DATA.md](DATA.md).
 - Best weights were saved as a TF checkpoint but checked as a single file, so they were never restored. Now saved as `.h5`.
 - Early stopping now starts from stock's val F1, so a run that never beats stock keeps stock.
 - On Linux the Core ML export is skipped (it needs macOS). Training and eval run anywhere.
+
+## Status log
+
+Append-only and oldest first. Each loop adds entries here; old entries are never edited
+or removed. Entries before 11:30 PT were rebuilt from git history (`git log -p --follow`),
+because the earlier status line was overwritten in place. The text in quotes is the
+original wording.
+
+| time (PT) | experiment | entry | commit |
+|---|---|---|---|
+| 2026-10-03 10:33 | E0, E1 | Logged. E0 stock: "synthetic val 0.879, test-gugs 0.861 (P 0.79 R 0.95), test-fluidr3 0.901, real: pending". E1 (original script defaults: 2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes): "0.670 (best epoch 0.727); precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept". Not shipped | b1f02fd |
+| 2026-10-03 10:44 | E2 started | Stock real-audio baselines: "GuitarSet 0.802 (0.822 @ onset 0.7); MAESTRO 0.695 (0.716 @ onset 0.6). Higher onset thresholds help stock on real audio". Eval sets then: "guitarset-test: GuitarSet player 05 (real, mic), 30 s chunks, 80 clips; maestro-test: MAESTRO v3 test split pieces; smd-test: pending". Added DATA.md (licenses) | f9b35ab |
+| 2026-10-03 10:45 | E2 | Status: "running E2, training, epoch 0/8, 2 min elapsed" | f64522f |
+| 2026-10-03 10:55 | E2 | Status: "running E2, final evaluation on test sets, epoch 3/8, 12 min elapsed. Last: [val-f1] epoch 3: note F1 0.6658 P 0.703 R 0.668 (best 0.8039)" | a6263c3 |
+| 2026-10-03 10:56 | E2 result | Fixed trainer on synthetic piano: mixed val 0.673 / 0.673 / 0.666 vs stock 0.804, so stock was kept. E0t (stock, onset threshold 0.7) wins on every held-out set. Next then: "E4 (running): all data ..., lr 3e-5; E3: multi-SoundFont synthetic only (ablation)" | 7c18061 |
+| 2026-10-03 11:02 | E4 result | Plain BCE + all data, lr 3e-5: mixed val 0.760 (ep1), 0.721 (ep2), stopped. Root cause: plain BCE collapses the onset head (max onset 0.97 down to 0.5-0.8). Weighted onset loss made the default; min_note_len added to the decoder grid (stock MAESTRO val 0.762 at 11 frames, 0.801 at 7). iOS handoff doc; model-ft-exp0 / model-latest releases (stock reference) | 9702000 |
+| 2026-10-03 11:05 | E4b | Status: "running E4b, training, epoch 2/8. Last: [val-f1] epoch 1: note F1 0.3841 P 0.297 R 0.613 (best 0.8039)" | 90f8baf |
+| 2026-10-03 11:15 | E4b | Status: "running E4b, final evaluation on test sets, epoch 3/8, 13 min elapsed. Last: [val-f1] epoch 3: note F1 0.2623 P 0.186 R 0.530 (best 0.8039)" | 0470760 |
+| 2026-10-03 11:25 | E5 probes | Status: "E5 probes (onset positive weight 0.1/0.03/0.3, 1 epoch each)" | 5071e35 |
+| 2026-10-03 11:30 | E4b result, E5 probes | E4b (class-balanced onset loss, pos weight 0.95): mixed val 0.384, 0.272, 0.262 (P 0.19-0.30) and stopped; it over-predicts onsets the other way. Probes, 1 epoch each, all data, lr 3e-5: **pw 0.03: 0.8132 (P 0.782 R 0.866), first run to beat stock 0.8039**; pw 0.1: 0.7467 (P 0.682 R 0.845); pw 0.3 running. Next: full E6 run with pw 0.03 | (this commit) |
