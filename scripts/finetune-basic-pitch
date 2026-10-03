@@ -25,8 +25,8 @@ Usage:
       [--onset-threshold 0.5 --frame-threshold 0.3]
 
 Training defaults (changed after experiments on synthetic + real audio, see
-docs/finetune.md): plain BCE onset loss (the old weighted loss with positive weight
-0.95 roughly doubled false onsets), BatchNorm frozen in inference mode, one stage
+docs/finetune/EXPERIMENTS.md): class-balanced onset loss (plain BCE collapses the onset
+head: peaks fall from ~0.97 to ~0.5), BatchNorm frozen in inference mode, one stage
 with linear warmup + cosine decay, fresh random windows every epoch, and early
 stopping on held-out note F1 that starts from the stock model's score, so a run that
 never beats stock keeps stock.
@@ -59,6 +59,7 @@ EXPECTED_OUT = {"note": 88, "onset": 88, "contour": 264}
 ONSET_TOLERANCE = 0.05  # 50 ms, per the prompt
 DEFAULT_ONSET_T = 0.5
 DEFAULT_FRAME_T = 0.3
+DEFAULT_MIN_NOTE_LEN = 11
 
 
 def log(msg: str) -> None:
@@ -384,12 +385,12 @@ def model_outputs(model, pairs) -> dict:
     return {stem: inference.run_inference(str(wav), model) for stem, wav, _ in pairs}
 
 
-def decode(output, onset_t: float, frame_t: float):
+def decode(output, onset_t: float, frame_t: float, min_note_len: int = DEFAULT_MIN_NOTE_LEN):
     from basic_pitch import note_creation as infer
 
     _midi, events = infer.model_output_to_notes(
         output, onset_thresh=onset_t, frame_thresh=frame_t, infer_onsets=True,
-        min_note_len=11, include_pitch_bends=False, melodia_trick=True)
+        min_note_len=int(min_note_len), include_pitch_bends=False, melodia_trick=True)
     return events
 
 
@@ -417,19 +418,21 @@ def note_f1(ref_intervals, ref_pitches, est_events) -> float:
     return note_scores(ref_intervals, ref_pitches, est_events)["f1"]
 
 
-def score_outputs(outputs: dict, pairs, onset_t: float, frame_t: float) -> dict:
+def score_outputs(outputs: dict, pairs, onset_t: float, frame_t: float,
+                  min_note_len: int = DEFAULT_MIN_NOTE_LEN) -> dict:
     f1s, rows = {}, []
     for stem, _wav, mid_path in pairs:
         ref_i, ref_p = reference_notes(mid_path)
         if len(ref_i) == 0 or stem not in outputs:
             continue
-        sc = note_scores(ref_i, ref_p, decode(outputs[stem], onset_t, frame_t))
+        sc = note_scores(ref_i, ref_p, decode(outputs[stem], onset_t, frame_t, min_note_len))
         f1s[stem] = round(sc["f1"], 4)
         rows.append(sc)
     mean = lambda k: round(sum(r[k] for r in rows) / len(rows), 4) if rows else 0.0  # noqa: E731
     return {"mean_f1": mean("f1"), "mean_precision": mean("p"), "mean_recall": mean("r"),
             "mean_f1_with_offset": mean("f1_offset"), "onset_threshold": onset_t,
-            "frame_threshold": frame_t, "clips": f1s, "n_clips": len(f1s)}
+            "frame_threshold": frame_t, "min_note_len": int(min_note_len),
+            "clips": f1s, "n_clips": len(f1s)}
 
 
 def evaluate_model(model_or_path, pairs, onset_t: float = DEFAULT_ONSET_T,
@@ -440,18 +443,20 @@ def evaluate_model(model_or_path, pairs, onset_t: float = DEFAULT_ONSET_T,
     return score_outputs(outputs, pairs, onset_t, frame_t)
 
 
-ONSET_GRID = (0.3, 0.4, 0.5, 0.6, 0.7)
+ONSET_GRID = (0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
 FRAME_GRID = (0.2, 0.3, 0.4, 0.5)
+MIN_NOTE_LEN_GRID = (5, 7, 11)  # frames (11.6 ms each); Spotify's default is 11
 
 
-def tune_thresholds(outputs: dict, pairs) -> tuple[float, float, float]:
-    """Grid-search decoder thresholds for mean note F1 on these pairs."""
-    best = (DEFAULT_ONSET_T, DEFAULT_FRAME_T, -1.0)
-    for o in ONSET_GRID:
-        for fr in FRAME_GRID:
-            f1 = score_outputs(outputs, pairs, o, fr)["mean_f1"]
-            if f1 > best[2]:
-                best = (o, fr, f1)
+def tune_thresholds(outputs: dict, pairs) -> tuple:
+    """Grid-search decoder settings (onset, frame, min note length) for mean note F1."""
+    best = (DEFAULT_ONSET_T, DEFAULT_FRAME_T, DEFAULT_MIN_NOTE_LEN, -1.0)
+    for mnl in MIN_NOTE_LEN_GRID:
+        for o in ONSET_GRID:
+            for fr in FRAME_GRID:
+                f1 = score_outputs(outputs, pairs, o, fr, mnl)["mean_f1"]
+                if f1 > best[3]:
+                    best = (o, fr, mnl, f1)
     return best
 
 
@@ -608,10 +613,10 @@ def eval_only(args) -> int:
         raise SystemExit(f"no wav+mid pairs in {args.val}")
     model = inference.Model(str(args.savedmodel))
     outputs = model_outputs(model, pairs)
-    table = score_outputs(outputs, pairs, args.onset_threshold, args.frame_threshold)
+    table = score_outputs(outputs, pairs, args.onset_threshold, args.frame_threshold, args.min_note_len)
     if args.tune_thresholds:
-        o, fr, f1 = tune_thresholds(outputs, pairs)
-        table["tuned"] = {k: v for k, v in score_outputs(outputs, pairs, o, fr).items() if k != "clips"}
+        o, fr, mnl, _f1 = tune_thresholds(outputs, pairs)
+        table["tuned"] = {k: v for k, v in score_outputs(outputs, pairs, o, fr, mnl).items() if k != "clips"}
     args.out.write_text(json.dumps(table, indent=2))
     log(json.dumps({k: v for k, v in table.items() if k != "clips"}))
     return 0
@@ -641,8 +646,9 @@ def main() -> int:
                         help="Training steps per epoch (0 = one pass over the tracks)")
     parser.add_argument("--patience", type=int, default=4)
     parser.add_argument("--max-epochs", type=int, default=12)
-    parser.add_argument("--onset-loss", choices=("plain", "weighted"), default="plain",
-                        help="plain BCE (default) or basic_pitch's weighted onset BCE")
+    parser.add_argument("--onset-loss", choices=("plain", "weighted"), default="weighted",
+                        help="weighted (default; class-balanced onset BCE as in the Basic Pitch "
+                             "paper) or plain BCE (collapses the onset head, see EXPERIMENTS.md E2/E4)")
     parser.add_argument("--positive-weight", type=float, default=0.95, help="for --onset-loss weighted")
     parser.add_argument("--label-smoothing", type=float, default=0.2)
     parser.add_argument("--freeze-bn", action=argparse.BooleanOptionalAction, default=True)
@@ -657,6 +663,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--onset-threshold", type=float, default=DEFAULT_ONSET_T)
     parser.add_argument("--frame-threshold", type=float, default=DEFAULT_FRAME_T)
+    parser.add_argument("--min-note-len", type=int, default=DEFAULT_MIN_NOTE_LEN)
     args = parser.parse_args()
 
     if args.eval_only:
@@ -774,12 +781,13 @@ def main() -> int:
     tuned = inference.Model(str(best_dir))
     tuned_val_out = model_outputs(tuned, val_pairs)
     tuned_val = score_outputs(tuned_val_out, val_pairs, DEFAULT_ONSET_T, DEFAULT_FRAME_T)
-    thresholds = {"stock": [DEFAULT_ONSET_T, DEFAULT_FRAME_T], "tuned": [DEFAULT_ONSET_T, DEFAULT_FRAME_T]}
+    d = [DEFAULT_ONSET_T, DEFAULT_FRAME_T, DEFAULT_MIN_NOTE_LEN]
+    thresholds = {"stock": d, "tuned": d}  # [onset, frame, min_note_len]
     if args.tune_thresholds:
-        so, sf, _ = tune_thresholds(frozen_val_out, val_pairs)
-        to, tfr, _ = tune_thresholds(tuned_val_out, val_pairs)
-        thresholds = {"stock": [so, sf], "tuned": [to, tfr]}
-        log(f"tuned thresholds on val: stock onset {so} frame {sf}; fine-tuned onset {to} frame {tfr}")
+        thresholds = {"stock": list(tune_thresholds(frozen_val_out, val_pairs)[:3]),
+                      "tuned": list(tune_thresholds(tuned_val_out, val_pairs)[:3])}
+        log(f"tuned decoder on val [onset, frame, min_note_len]: stock {thresholds['stock']}; "
+            f"fine-tuned {thresholds['tuned']}")
 
     def both(pairs):
         if not pairs:

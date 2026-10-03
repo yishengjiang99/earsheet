@@ -43,13 +43,30 @@ Columns are onset-F1 on held-out sets. "mixed val" = synth val + GuitarSet val +
 | E0 | stock ICASSP 2022, thresholds 0.5/0.3 | 0.804 | 0.861 | 0.901 | 0.646 | 0.802 | 0.695 | (E4 run) | 742 KB tfjs bin | baseline |
 | E0t | stock, onset threshold 0.7 / frame 0.3 (tuned on mixed val) | - | **0.892** | **0.922** | **0.715** | **0.822** | **0.701** | (E4 run) | same | free win: higher onset threshold cuts false onsets everywhere (P 0.79 to 0.84 on gugs, 0.77 to 0.82 on GuitarSet) |
 | E2 | fixed trainer (plain BCE, BN frozen, warmup+cosine 1e-4, gain/EQ/reverb/noise aug), 400 GUGS piano etudes | 0.673 (ep1) / 0.673 / 0.666 | (kept stock) | | | | | | | early stop at epoch 3, never beat stock 0.804, stock kept. A side check of the epoch-2 weights: synth val 0.827 (0.916 at tuned thresholds) but MAESTRO val fell from about 0.70 to 0.52. Synthetic-piano-only fine-tuning overfits the renderer timbre and hurts real piano |
+| E4 | E2 trainer + all data: 400 GUGS + 700 GM multi-instrument (4 SF2s) + 300 piano (Salamander, Upright KW, MuseScore) + 150 guitar (Spanish Classical) etudes + real GuitarSet p00-03 (320 x 30 s), MAESTRO 35 train pieces (206), SMD train works (438); lr 3e-5 | 0.760 (ep1), 0.721 (ep2) | | | | | | | | stopped at epoch 2 (falling). **Root cause for E2/E4: plain BCE collapses the onset head.** Max onset posterior fell from about 0.97 (stock) to 0.52 (E2) / 0.79 (E4), so notes only come from inferred onsets and recall drops. The Basic Pitch paper trains onsets with class-balanced BCE; that is now the default again (`--onset-loss weighted`) |
 | E1 | original script defaults (2-stage, weighted onset loss pw 0.95, BN training, 400 GUGS piano etudes) | synth val only: 0.670 (best epoch 0.727) vs stock 0.879 | | | | | | | | precision collapsed (P 0.60, R 0.88); never beat stock. Best-epoch restore was broken, so the last epoch was kept |
+
+## Decoder finding (no training needed)
+
+Spotify's `min_note_len` of 11 frames (128 ms) drops fast real-piano notes. On 14 MAESTRO
+val chunks, stock F1 goes from 0.762 at 11 frames / onset 0.5, to 0.768 at 11 / 0.7,
+to **0.801 at 7 / 0.7**. The threshold tuner now grids onset x frame x min_note_len {5, 7, 11}.
 
 ## Next
 
-- E4 (running): all data (synthetic GUGS + 7-SoundFont multi-instrument + real GuitarSet/MAESTRO/SMD train), lr 3e-5 (lower after E2 drifted at 1e-4)
-- E3: multi-SoundFont synthetic only (ablation)
-- Candidates are published as GitHub release assets (see "Artifacts" below).
+- E4b (running): E4 data + class-balanced onset loss (pos weight 0.95), BN frozen, lr 3e-5
+- E3: multi-SoundFont synthetic only (ablation), if time allows
+- Candidates are published as GitHub release assets (see "Artifacts").
+
+## Artifacts
+
+Weights live in GitHub releases, never in git. Each release has a SavedModel zip, a
+TF.js zip, a Core ML `BasicPitchPoly.mlpackage` zip, `SHA256SUMS`, and a
+`models.lock.snippet`. They are built by `tools/model-export/export-model.sh`.
+
+- **Latest: [model-latest](https://github.com/yishengjiang99/earsheet/releases/tag/model-latest)**, currently the stock reference export (`model-ft-exp0`); no fine-tune has beaten stock yet
+- [model-ft-exp0](https://github.com/yishengjiang99/earsheet/releases/tag/model-ft-exp0): stock ICASSP 2022 through the export pipeline (recommended thresholds onset 0.7 / frame 0.3)
+- iOS integration: [IOS_MODEL_HANDOFF.md](IOS_MODEL_HANDOFF.md)
 
 ## Plan
 
