@@ -20,12 +20,12 @@ struct OnboardingView: View {
                 OnboardingPage(
                     art: AnyView(MicArt()),
                     title: "Hear the music.",
-                    body: "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Nothing ever leaves your phone."
+                    text: "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Nothing ever leaves your phone."
                 ).tag(0)
                 OnboardingPage(
                     art: AnyView(PageArt()),
                     title: "Get the page.",
-                    body: "Watch the score write itself in real time. Play it back, study the engraved page, or share it as MIDI, MP3, MusicXML, PDF, or a photo."
+                    text: "Watch the score write itself in real time. Play it back, study the engraved page, or share it as MIDI, MP3, MusicXML, PDF, or a photo."
                 ).tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -62,7 +62,7 @@ struct OnboardingView: View {
 private struct OnboardingPage: View {
     var art: AnyView
     var title: String
-    var body: String
+    var text: String
 
     var body: some View {
         VStack(spacing: 28) {
@@ -72,7 +72,7 @@ private struct OnboardingPage: View {
             Text(title)
                 .font(.system(size: 40, weight: .regular, design: .serif))
                 .foregroundStyle(Ink.ink)
-            Text(body)
+            Text(text)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
