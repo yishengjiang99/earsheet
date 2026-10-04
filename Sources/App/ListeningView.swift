@@ -130,6 +130,9 @@ final class ListeningSession: ObservableObject {
         }
         finalSamples = samples
         canDebugExport = true
+        // Persist the session PCM with the take so the take's Export screen can
+        // share exactly what the mic heard (nil when the write fails).
+        let audioFileName = SessionDebugExport.persistSessionAudio(samples)
         if dueToLimit {
             notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
         }
@@ -171,13 +174,15 @@ final class ListeningSession: ObservableObject {
                                     createdAt: Date(),
                                     score: score,
                                     isSample: false,
-                                    events: notes)
+                                    events: notes,
+                                    audioFileName: audioFileName)
                     // Shown in place with a non-blocking "Not saved" banner (no alert or auto
                     // paywall over the take); the paywall opens from the banner.
                     self.pendingTake = take
                     self.phase = .done(take)
                 } else {
-                    let take = self.library.addTake(score: score, events: notes)
+                    let take = self.library.addTake(score: score, events: notes,
+                                                      audioFileName: audioFileName)
                     self.phase = .done(take)
                 }
             }
@@ -207,6 +212,9 @@ final class ListeningSession: ObservableObject {
         recorder.onSamples = nil
         recorder.onLevel = nil
         if case .listening = phase { _ = recorder.stop() }
+        if let name = pendingTake?.audioFileName {
+            try? FileManager.default.removeItem(at: TakeLibrary.audioURL(fileName: name))
+        }
         pendingTake = nil
         saveLimitReached = false
         notice = nil

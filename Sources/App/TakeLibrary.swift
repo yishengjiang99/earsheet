@@ -14,6 +14,9 @@ struct Take: Identifiable, Codable, Hashable {
     var isSample: Bool
     /// Raw detected notes in seconds (nil for takes saved before they were kept).
     var events: [NoteEvent]? = nil
+    /// Session mic-audio WAV filename in the library's Application Support dir
+    /// (nil for takes recorded before it was kept, imports, and samples).
+    var audioFileName: String? = nil
     /// Tempo the user assumed for the sheet (quarter-note BPM); nil = estimated.
     var tempoOverride: Double? = nil
     /// Sheet-music analysis (tempo, meter, key, quantization), computed on request only.
@@ -87,13 +90,15 @@ final class TakeLibrary: ObservableObject {
 
     var userTakes: [Take] { takes }
 
-    func addTake(title: String? = nil, score: QuantizedScore, events: [NoteEvent]? = nil) -> Take {
+    func addTake(title: String? = nil, score: QuantizedScore, events: [NoteEvent]? = nil,
+                 audioFileName: String? = nil) -> Take {
         let take = Take(id: UUID(),
                         title: title ?? "Take \(takes.count + 1)",
                         createdAt: Date(),
                         score: score,
                         isSample: false,
-                        events: events)
+                        events: events,
+                        audioFileName: audioFileName)
         takes.insert(take, at: 0)
         save()
         return take
@@ -160,6 +165,9 @@ final class TakeLibrary: ObservableObject {
 
     func delete(_ take: Take) {
         stopPlayback()
+        if let name = take.audioFileName {
+            try? FileManager.default.removeItem(at: Self.audioURL(fileName: name))
+        }
         takes.removeAll { $0.id == take.id }
         save()
     }
@@ -226,6 +234,14 @@ final class TakeLibrary: ObservableObject {
             .appendingPathComponent(HearSheet.bundleIdentifier, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("takes.json", isDirectory: false)
+    }
+
+    /// URL of a take's session-audio WAV in the library's Application Support dir.
+    static func audioURL(fileName: String) -> URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(HearSheet.bundleIdentifier, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(fileName, isDirectory: false)
     }
 
     private func load() {
