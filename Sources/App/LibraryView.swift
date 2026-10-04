@@ -72,19 +72,22 @@ struct LibraryView: View {
                         }
                         .accessibilityLabel("Listen to music")
                         .accessibilityHint("Starts listening and writes the score as you play")
-                        Button(action: { showVideoPicker = true }) {
+                        Menu {
+                            Button("Choose Audio or MIDI File") { showImporter = true }
+                            Button("Choose Video from Photos") { showVideoPicker = true }
+                        } label: {
                             ZStack {
                                 Circle()
                                     .fill(.white)
                                     .frame(width: 56, height: 56)
                                     .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-                                Image(systemName: "video.fill")
+                                Image(systemName: "square.and.arrow.down")
                                     .font(.system(size: 22))
                                     .foregroundStyle(Ink.teal)
                             }
                         }
-                        .accessibilityLabel("Import video from Photos")
-                        .accessibilityHint("Chooses a video and transcribes its audio")
+                        .accessibilityLabel("Import")
+                        .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                     }
                     Text("Tap to listen — AI Music Radar writes the score as you play.")
                         .font(.footnote)
