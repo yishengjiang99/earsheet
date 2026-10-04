@@ -127,13 +127,20 @@ final class ListeningSession: ObservableObject {
         }
         phase = .writing
         let streamer = self.streamer
+        let dropQuiet = InputConditioner.Settings.load().dropQuietNotes
+        let gateThresholdDB = recorder.gateThresholdDB
         pumpQueue.async { [weak self] in
             // Drain remaining audio including the final partial window,
             // then finalize with the batch trim.
             let notes: [NoteEvent]
             do {
                 if let streamer { try streamer.finish() }
-                notes = streamer?.finalize() ?? []
+                let heard = streamer?.finalize() ?? []
+                // Notes whose onset is below the gate (e.g. heard in residual AC noise) are dropped.
+                notes = dropQuiet
+                    ? InputConditioner.dropQuietNotes(heard, samples: samples, sampleRate: AudioRecorder.targetSampleRate,
+                                                      thresholdDB: gateThresholdDB)
+                    : heard
             } catch {
                 Task { @MainActor [weak self] in
                     self?.phase = .failed("Could not write the page: \(error.localizedDescription)")

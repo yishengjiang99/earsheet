@@ -15,9 +15,12 @@ public final class AudioRecorder {
     private var samples: [Float] = []
     private var peak: Float = 0
     private var observers: [NSObjectProtocol] = []
-    /// Noise gate on the 22050 Hz mono signal, before the level meter and the model.
-    /// Settings are re-read from UserDefaults (`NoiseGate.Settings.load()`) at each `start()`.
-    private var gate = NoiseGate(sampleRate: AudioRecorder.targetSampleRate)
+    /// High-pass + adaptive noise floor + noise gate on the 22050 Hz mono signal, before the
+    /// level meter and the model. Settings are re-read from UserDefaults at each `start()`.
+    private var conditioner = InputConditioner(sampleRate: AudioRecorder.targetSampleRate)
+    private var floorSnapshot: Double?
+    private var thresholdSnapshot = NoiseGate.Settings.default.thresholdDB
+    private var floorSaved = false
     /// Hardware sample rate the current tap was installed with.
     private var tapSampleRate: Double = 0
     public private(set) var isRecording = false
@@ -52,8 +55,11 @@ public final class AudioRecorder {
         samples.removeAll(keepingCapacity: true)
         peak = 0
         lock.unlock()
-        gate.configure(NoiseGate.Settings.load())
-        gate.reset()
+        conditioner.configure(InputConditioner.Settings.load())
+        conditioner.reset()
+        floorSnapshot = nil
+        thresholdSnapshot = conditioner.thresholdDB
+        floorSaved = false
 
         do {
             try installTap()
@@ -100,7 +106,8 @@ public final class AudioRecorder {
             let n = Int(buffer.frameLength)
             guard n > 0, let channels = buffer.floatChannelData else { return }
             let ch = channels[0]
-            self.gate.process(ch, count: n)   // audio thread only; reset/configured before the tap starts
+            self.conditioner.process(ch, count: n) // audio thread only; reset/configured before the tap starts
+            let floor = self.conditioner.noiseFloorDB, threshold = self.conditioner.thresholdDB
             var localPeak: Float = 0
             for i in 0..<n {
                 let a = abs(ch[i])
@@ -112,10 +119,15 @@ public final class AudioRecorder {
                 self.samples.append(contentsOf: UnsafeBufferPointer(start: ch, count: take))
             }
             if localPeak > self.peak { self.peak = localPeak } else { self.peak *= 0.999 }
+            self.floorSnapshot = floor
+            self.thresholdSnapshot = threshold
+            let firstFloor = floor != nil && !self.floorSaved
+            if firstFloor { self.floorSaved = true }
             let p = self.peak
             let emit = self.onSamples
             self.lock.unlock()
             self.onLevel?(p)
+            if firstFloor, let floor { Self.saveFloor(floor) } // Settings › Microphone shows it
             if let emit, take > 0 {
                 emit(Array(UnsafeBufferPointer(start: ch, count: take)))
             }
@@ -171,7 +183,28 @@ public final class AudioRecorder {
         lock.lock()
         defer { lock.unlock() }
         isRecording = false
+        if let floorSnapshot { Self.saveFloor(floorSnapshot) }
         return samples
+    }
+
+    /// Ambient noise floor measured in this recording (RMS dBFS after the high-pass), nil
+    /// during the first 0.5 s.
+    public var noiseFloorDB: Double? {
+        lock.lock(); defer { lock.unlock() }
+        return floorSnapshot
+    }
+
+    /// Gate threshold in use (floor + margin with Auto on, else the manual threshold).
+    public var gateThresholdDB: Double {
+        lock.lock(); defer { lock.unlock() }
+        return thresholdSnapshot
+    }
+
+    private static func saveFloor(_ db: Double) {
+        DispatchQueue.main.async {
+            UserDefaults.standard.set(db, forKey: InputConditioner.Settings.Keys.lastFloorDB)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: InputConditioner.Settings.Keys.lastFloorAt)
+        }
     }
 
     public var recordedSampleCount: Int {

@@ -90,6 +90,7 @@ jobs:
             -only-testing:EarSheetTests/VerifyQueueTests \
             -only-testing:EarSheetTests/TelemetryTests \
             -only-testing:EarSheetTests/PushPermissionTests \
+            -only-testing:EarSheetTests/SheetAnalysisTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \

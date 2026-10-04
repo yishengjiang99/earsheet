@@ -85,6 +85,11 @@ public struct NoiseGate {
         holdSamples = max(0, Int((sampleRate * s.hold).rounded()))
     }
 
+    /// Changes only the threshold (e.g. from the adaptive noise floor), keeping the envelope.
+    public mutating func setThresholdDB(_ db: Double) {
+        settings.thresholdDB = db
+    }
+
     public mutating func reset() {
         envelope = 0
         holdRemaining = 0
