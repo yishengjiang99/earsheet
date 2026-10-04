@@ -1,1 +1,1 @@
-transcribe,transcription,musicxml,piano,score,notes,melody,offline,private,songwriter,ear,pdf,tempo
+transcribe,transcription,piano,sheet,score,notes,melody,midi,musicxml,songwriter,offline,guitar,pdf

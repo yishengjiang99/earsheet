@@ -1,1 +1,1 @@
-Play, sing or import a song and get real sheet music in seconds. Runs entirely on your iPhone: no account, no upload, works offline.
+It writes the score while you play. Real-time, on-device transcription of piano, voice and more into sheet music, MIDI and PDF. No account, works offline.
