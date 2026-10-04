@@ -72,9 +72,6 @@ struct LibraryView: View {
                         }
                         .accessibilityLabel("Listen to music")
                         .accessibilityHint("Starts listening and writes the score as you play")
-                        Menu {
-                            Button("Choose Audio or MIDI File") { showImporter = true }
-                            Button("Choose Video from Photos") { showVideoPicker = true }
                         Button(action: { showVideoPicker = true }) {
                             ZStack {
                                 Circle()
