@@ -163,6 +163,8 @@ private struct NoteEntry {
     var segment: Int // 0 = first segment of the note; later segments are tied to the previous
     var lastSegment: Bool
     var system: Int
+    var chordIndex: Int = 0 // position in its chord, low to high
+    var chordSize: Int = 1
 }
 
 private struct BeamGroup {
@@ -170,6 +172,8 @@ private struct BeamGroup {
     var stemUp: Bool
     var indices: [Int] // NoteEntry indices, in time order
     var level: Int // 1 = eighth beam, 2 = sixteenth second beam
+    /// Partial (stub) beam for a lone 16th inside an eighth beam: +1 points right, -1 left.
+    var stub: CGFloat? = nil
 }
 
 private struct Tie { var x0: CGFloat; var x1: CGFloat; var y: CGFloat; var below: Bool }
@@ -592,7 +596,8 @@ private struct Layout {
                             stemmed: sg.duration16 < 16,
                             beamID: nil,
                             flags: on.beam == nil ? (sg.duration16 == 1 ? 2 : (sg.duration16 <= 3 ? 1 : 0)) : 0,
-                            segment: sg.index, lastSegment: sg.last, system: sysIdx)
+                            segment: sg.index, lastSegment: sg.last, system: sysIdx,
+                            chordIndex: k, chordSize: on.segs.count)
                         entryOfSeg[si] = noteEntries.count
                         entriesOfOnset[o].append(noteEntries.count)
                         noteEntries.append(entry)
@@ -664,6 +669,14 @@ private struct Layout {
             }
             for o in run { if onsets[o].dur16 == 1 { sub.append(o) } else { flushSub() } }
             flushSub()
+            // A lone 16th in the run (e.g. dotted 8th + 16th) gets a partial beam toward its neighbor.
+            for (k, o) in run.enumerated() where onsets[o].dur16 == 1 {
+                let prev16 = k > 0 && onsets[run[k - 1]].dur16 == 1
+                let next16 = k + 1 < run.count && onsets[run[k + 1]].dur16 == 1
+                guard !prev16, !next16 else { continue }
+                beamGroups.append(BeamGroup(staff: noteEntries[first].staff, stemUp: up,
+                                            indices: entriesOfOnset[o], level: 2, stub: k == 0 ? 1 : -1))
+            }
         }
 
         // Ties: from each segment to the next one of the same note; across a system break, to the
@@ -673,7 +686,8 @@ private struct Layout {
             let a = entryOfSeg[si], b = si + 1 < segs.count ? entryOfSeg[si + 1] : -1
             guard a >= 0, b >= 0 else { continue }
             let ea = noteEntries[a], eb = noteEntries[b]
-            let below = !ea.stemUp
+            // Ties curve away from the stem; in a chord the lower notes tie below, upper above.
+            let below = ea.chordSize > 1 ? ea.chordIndex * 2 + 1 < ea.chordSize : ea.stemUp
             let off = below ? 0.75 * s : -0.75 * s
             if ea.system == eb.system {
                 let x0 = ea.head.x + hh + 1.5
@@ -803,10 +817,13 @@ private struct Renderer {
 
     mutating func drawBeam(_ b: BeamGroup) {
         guard let first = b.indices.first, let last = b.indices.last else { return }
-        let x0 = layout.noteEntries[first].stemX
-        let x1 = layout.noteEntries[last].stemX
+        var x0 = layout.noteEntries[first].stemX
+        var x1 = layout.noteEntries[last].stemX
         let y0 = layout.noteEntries[first].stemEndY
         let y1 = layout.noteEntries[last].stemEndY
+        if let stub = b.stub {
+            if stub > 0 { x1 = x0 + s * 1.1 } else { x0 = x1 - s * 1.1 }
+        }
         // Beam thickness 4, second beam offset toward noteheads.
         let dir: CGFloat = b.stemUp ? 1 : -1
         let yo = CGFloat(b.level - 1) * 7 * dir

@@ -119,6 +119,8 @@ final class EngravingReadabilityTests: XCTestCase {
             XCTAssertLessThan(t.x1, cont.headCenter.x)
             XCTAssertGreaterThan(t.x1, t.x0)
             XCTAssertEqual(t.y, first.headCenter.y, accuracy: s, "tie stays at its notehead")
+            // Opposite the stem: stem up → tie below the head (larger y).
+            XCTAssertEqual(t.y > first.headCenter.y, first.stemUp, "tie on the stem side")
         }
     }
 
