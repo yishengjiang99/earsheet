@@ -17,7 +17,7 @@ struct LibraryView: View {
     @State private var importTask: Task<Void, Never>?
     @State private var showPaywall = false
     @State private var showSettings = false
-    @State private var pendingScore: (score: QuantizedScore, title: String?)?
+    @State private var pendingScore: (score: QuantizedScore, title: String?, events: [NoteEvent])?
     /// Library > Take only: finished recordings and imports replace the path with their take.
     @State private var path: [Take] = []
     @State private var takeToOpen: Take?
@@ -148,9 +148,9 @@ struct LibraryView: View {
                 pendingScore = nil
                 showPaywall = false
                 if let title = pending.title {
-                    open(library.addTake(title: title, score: pending.score))
+                    open(library.addTake(title: title, score: pending.score, events: pending.events))
                 } else {
-                    open(library.addTake(score: pending.score))
+                    open(library.addTake(score: pending.score, events: pending.events))
                 }
             }
         }
@@ -187,9 +187,9 @@ struct LibraryView: View {
     }
 
     /// Save a transcribed score, or hold it behind the paywall at the free limit.
-    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil) {
+    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil, events: [NoteEvent]) {
         if !proStore.isPro && library.userTakes.count >= ProStore.freeSaveLimit {
-            pendingScore = (score, title)
+            pendingScore = (score, title, events)
             if triggers.canShowAuto(.saveLimit) {
                 triggers.recordAutoShown(.saveLimit)
                 showPaywall = true
@@ -197,9 +197,9 @@ struct LibraryView: View {
                 library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
             }
         } else if let title {
-            open(library.addTake(title: title, score: score))
+            open(library.addTake(title: title, score: score, events: events))
         } else {
-            open(library.addTake(score: score))
+            open(library.addTake(score: score, events: events))
         }
     }
 
@@ -220,7 +220,7 @@ struct LibraryView: View {
                     return
                 }
                 let score = Quantizer.quantize(events)
-                saveImportedScore(score, title: url.deletingPathExtension().lastPathComponent)
+                saveImportedScore(score, title: url.deletingPathExtension().lastPathComponent, events: events)
             } catch {
                 library.postNotice("Could not read that MIDI file.")
             }
@@ -249,7 +249,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that video's audio.")
                 } else {
-                    saveImportedScore(score)
+                    saveImportedScore(score, events: notes)
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
@@ -280,7 +280,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
-                    open(library.addTake(score: score))
+                    open(library.addTake(score: score, events: notes))
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.

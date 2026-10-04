@@ -68,6 +68,8 @@ final class StaffRenderView: UIView {
 struct PianoRollPageView: UIViewRepresentable {
     var score: QuantizedScore
     var highlighted: Set<Int>
+    /// Beat/bar lines at the score's tempo; only once the tempo has been analyzed.
+    var beatGrid: Bool = false
 
     func makeUIView(context: Context) -> PianoRollRenderView {
         PianoRollRenderView()
@@ -76,6 +78,7 @@ struct PianoRollPageView: UIViewRepresentable {
     func updateUIView(_ view: PianoRollRenderView, context: Context) {
         view.score = score
         view.highlighted = highlighted
+        view.beatGrid = beatGrid
     }
 }
 
@@ -86,6 +89,9 @@ final class PianoRollRenderView: UIView {
     var highlighted: Set<Int> = [] {
         didSet { if highlighted != oldValue { setNeedsDisplay() } }
     }
+    var beatGrid = false {
+        didSet { if beatGrid != oldValue { setNeedsDisplay() } }
+    }
 
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: 260)
@@ -93,6 +99,6 @@ final class PianoRollRenderView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let score, let ctx = UIGraphicsGetCurrentContext() else { return }
-        PianoRoll.draw(score: score, in: ctx, rect: bounds, highlighted: highlighted)
+        PianoRoll.draw(score: score, in: ctx, rect: bounds, highlighted: highlighted, beatGrid: beatGrid)
     }
 }

@@ -26,15 +26,32 @@ public enum Engraver {
         public var ledgerLineCount: Int
     }
 
+    public struct MeasureFrame {
+        /// Measure index from 0 (bar = start16 / sixteenths per bar).
+        public var index: Int
+        public var system: Int
+        /// Left edge of the note area (after the clef/key/time on a system's first measure).
+        public var contentMinX: CGFloat
+        /// Right barline.
+        public var maxX: CGFloat
+    }
+
     public struct Page {
         public var size: CGSize
         public var notes: [EngravedNote]
         /// Vertical extent of each system including ledger lines, stems and clefs (never overlapping).
         public var systemFrames: [CGRect]
         public var isGrandStaff: Bool
+        /// Horizontal span of each measure (left edge of its note area to its right barline).
+        public var measures: [MeasureFrame]
+        /// Metronome mark drawn above the first system (nil unless `Style.tempoMark`).
+        public var tempoMarkText: String?
         /// Internal layout used by `draw`.
         fileprivate var layout: Layout
     }
+
+    /// Standard metronome mark for the score's (quarter-note) tempo, e.g. "♩ = 96".
+    public static func metronomeMark(bpm: Double) -> String { "\u{2669} = \(Int(bpm.rounded()))" }
 
     public struct Style {
         public var staffSpace: CGFloat = 9
@@ -43,7 +60,11 @@ public enum Engraver {
         public var topMargin: CGFloat = 28
         public var systemGap: CGFloat = 44
         public var grandStaffGap: CGFloat = 26
+        /// Draw a metronome mark ("♩ = 96", the assumed tempo) above the first system.
+        public var tempoMark: Bool = false
         public init() {}
+        /// Exports (PDF / photo): shows the assumed tempo on the page.
+        public static var export: Style { var st = Style(); st.tempoMark = true; return st }
     }
 
     // MARK: - Entry points
@@ -53,8 +74,8 @@ public enum Engraver {
         return Page(size: l.size,
                     notes: l.noteEntries.map { EngravedNote(noteIndex: $0.noteIndex, headCenter: $0.head, frame: $0.frame,
                                                             staff: $0.staff, ledgerLineCount: $0.ledgerYs.count) },
-                    systemFrames: l.systemFrames, isGrandStaff: l.grandStaff,
-                    layout: l)
+                    systemFrames: l.systemFrames, isGrandStaff: l.grandStaff, measures: l.measures,
+                    tempoMarkText: l.tempoMark?.text, layout: l)
     }
 
     /// Draws the page into `ctx`. If `flipped` is true the context has y-down
@@ -66,8 +87,7 @@ public enum Engraver {
     }
 
     public static func pdfData(score: QuantizedScore, pageSize: CGSize) -> Data {
-        let style = Style()
-        let page = layout(score: score, width: pageSize.width - 48, style: style)
+        let page = layout(score: score, width: pageSize.width - 48, style: .export)
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
               let ctx = CGContext(consumer: consumer,
@@ -127,6 +147,8 @@ private struct Layout {
     let timeSig: [(x: CGFloat, y: CGFloat, text: String, staff: Int, system: Int)]
     let braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)]
     let systemFrames: [CGRect]
+    let measures: [Engraver.MeasureFrame]
+    let tempoMark: (x: CGFloat, y: CGFloat, text: String)?
 
     init(score: QuantizedScore, width: CGFloat, style: Engraver.Style) {
         let s = style.staffSpace
@@ -146,20 +168,37 @@ private struct Layout {
             let b = min(barCount - 1, n.start16 / sixteenthsPerBar)
             onsetsPerBar[b] += 1
         }
-        let measureWidths: [CGFloat] = onsetsPerBar.map { c in
-            min(230, max(72, 30 + CGFloat(c) * 16))
-        }
-
-        // Pack measures into systems.
-        var systems: [[Int]] = []
-        var cur: [Int] = []
-        var curW: CGFloat = 0
         // Grand staff: room for the brace left of the system.
         let braceRoom: CGFloat = grand ? 10 : 0
         let contentW = width - style.leftMargin - braceRoom - style.rightMargin
+        // Clef + key + time at the start of every system. This is extra width on the system's
+        // first measure; it used to come out of that measure's note area, squeezing its notes
+        // against the time signature (or left of it with a key signature).
+        let header = 6 + s * 3.2 + CGFloat(abs(score.key.fifths)) * s * 0.95 + s * 2.2
+
+        // Measure widths: enough for the onset count and for the closest pair of onsets
+        // (onsets are placed proportionally to time within the bar, like the piano roll).
+        var barOnsets = [Set<Int>](repeating: [], count: barCount)
+        for n in score.notes {
+            let b = min(barCount - 1, n.start16 / sixteenthsPerBar)
+            barOnsets[b].insert(n.start16 - b * sixteenthsPerBar)
+        }
+        let minOnsetSpacing = s * 2.4
+        let maxMeasureW = max(72, min(260, contentW - header))
+        let measureWidths: [CGFloat] = (0..<barCount).map { b in
+            let sorted = barOnsets[b].sorted()
+            let minGap = zip(sorted, sorted.dropFirst()).map { $1 - $0 }.min() ?? sixteenthsPerBar
+            let byGap = 20 + CGFloat(sixteenthsPerBar) / CGFloat(max(1, minGap)) * minOnsetSpacing
+            return min(maxMeasureW, max(72, 30 + CGFloat(onsetsPerBar[b]) * 16, byGap))
+        }
+
+        // Pack measures into systems (each system starts with the header).
+        var systems: [[Int]] = []
+        var cur: [Int] = []
+        var curW: CGFloat = header
         for (i, w) in measureWidths.enumerated() {
             if !cur.isEmpty, curW + w > contentW {
-                systems.append(cur); cur = []; curW = 0
+                systems.append(cur); cur = []; curW = header
             }
             cur.append(i); curW += w
         }
@@ -175,9 +214,17 @@ private struct Layout {
         var beamGroups: [BeamGroup] = []
         var braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)] = []
         var systemFrames: [CGRect] = []
+        var measures: [Engraver.MeasureFrame] = []
 
         var y = style.topMargin
         var prevBottom: CGFloat = 0 // bottom extent of the previous system
+        if style.tempoMark {
+            // Reserve a line above the first system for the metronome mark.
+            self.tempoMark = (x: style.leftMargin + braceRoom, y: 4, text: Engraver.metronomeMark(bpm: score.tempoBPM))
+            prevBottom = 4 + 18
+        } else {
+            self.tempoMark = nil
+        }
         let keyFifths = score.key.fifths
         let preferSharps = keyFifths >= 0
 
@@ -185,7 +232,7 @@ private struct Layout {
             let sysTop = y
             let marks = (lines: staffLines.count, bars: barlines.count, clefs: clefs.count, keys: keySig.count,
                          times: timeSig.count, notes: noteEntries.count, braces: braces.count)
-            let sysW = sys.reduce(0) { $0 + measureWidths[$1] }
+            let sysW = header + sys.reduce(0) { $0 + measureWidths[$1] }
             let x0 = style.leftMargin + braceRoom
             let x1 = x0 + min(contentW, sysW)
 
@@ -216,13 +263,14 @@ private struct Layout {
             // Notes per measure.
             var mx = x0
             // Reserve room for clef/key/time on every system.
-            let contentX0 = x0 + 6 + s * 3.2 + CGFloat(abs(keyFifths)) * s * 0.95 + s * 2.2
+            let contentX0 = x0 + header
             for (mi, bar) in sys.enumerated() {
                 let mw = measureWidths[bar]
                 let barStart16 = bar * sixteenthsPerBar
                 let barEnd16 = barStart16 + sixteenthsPerBar
                 let mLeft = (mi == 0) ? contentX0 : mx
-                let mRight = mx + mw
+                let mRight = mLeft + mw
+                measures.append(Engraver.MeasureFrame(index: bar, system: sysIdx, contentMinX: mLeft, maxX: mRight))
                 let usable = mRight - mLeft - 8
 
                 // Barline at measure start (except first of system) and end.
@@ -291,7 +339,7 @@ private struct Layout {
                         }
                     }
                 }
-                mx += mw
+                mx = mRight
             }
             if grand {
                 // Brace + system-start line joining the two staves.
@@ -348,6 +396,7 @@ private struct Layout {
         self.timeSig = timeSig
         self.braces = braces
         self.systemFrames = systemFrames
+        self.measures = measures
     }
 }
 
@@ -537,6 +586,9 @@ private struct Renderer {
         for t in layout.timeSig {
             drawText(t.text, at: CGPoint(x: t.x, y: t.y - 8), size: 19, bold: true)
         }
+        if let t = layout.tempoMark {
+            drawText(t.text, at: CGPoint(x: t.x, y: t.y), size: 14, bold: true)
+        }
         for e in layout.noteEntries {
             drawNote(e)
         }
@@ -694,27 +746,18 @@ public enum PianoRoll {
     }
 
     /// Draws into `rect` (y-down). `highlighted` = note indices to emphasize.
+    /// - Parameter beatGrid: draw beat and bar lines at the score's tempo/meter (only once the
+    ///   tempo has been analyzed; before that the roll is drawn without a beat grid).
     public static func draw(score: QuantizedScore, in ctx: CGContext, rect: CGRect,
-                            highlighted: Set<Int> = []) {
+                            highlighted: Set<Int> = [], beatGrid: Bool = true) {
         let (bars, range, total16) = self.bars(score: score)
         let rows = range.upperBound - range.lowerBound + 1
         let cw = rect.width / CGFloat(total16)
         let rh = rect.height / CGFloat(rows)
         ctx.saveGState()
-        // Background + grid.
+        // Background.
         ctx.setFillColor(CGColor(gray: 0.96, alpha: 1))
         ctx.fill(rect)
-        ctx.setStrokeColor(CGColor(gray: 0.85, alpha: 1))
-        ctx.setLineWidth(0.5)
-        let beat16 = 4
-        var t = 0
-        while t <= total16 {
-            let x = rect.minX + CGFloat(t) * cw
-            ctx.move(to: CGPoint(x: x, y: rect.minY))
-            ctx.addLine(to: CGPoint(x: x, y: rect.maxY))
-            ctx.strokePath()
-            t += beat16
-        }
         // Black-key rows shaded.
         let black: Set<Int> = [1, 3, 6, 8, 10]
         for m in range {
@@ -722,6 +765,21 @@ public enum PianoRoll {
                 let y = rect.minY + CGFloat(range.upperBound - m) * rh
                 ctx.setFillColor(CGColor(gray: 0.9, alpha: 1))
                 ctx.fill(CGRect(x: rect.minX, y: y, width: rect.width, height: rh))
+            }
+        }
+        // Beat grid (bar lines darker).
+        if beatGrid {
+            let beat16 = max(1, 16 / max(1, score.meter.beatUnit))
+            let bar16 = max(1, score.meter.beatsPerBar * beat16)
+            var t = 0
+            while t <= total16 {
+                let x = rect.minX + CGFloat(t) * cw
+                ctx.setStrokeColor(CGColor(gray: t % bar16 == 0 ? 0.6 : 0.82, alpha: 1))
+                ctx.setLineWidth(t % bar16 == 0 ? 1 : 0.5)
+                ctx.move(to: CGPoint(x: x, y: rect.minY))
+                ctx.addLine(to: CGPoint(x: x, y: rect.maxY))
+                ctx.strokePath()
+                t += beat16
             }
         }
         // Bars.

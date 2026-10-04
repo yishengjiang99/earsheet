@@ -8,7 +8,13 @@ import Foundation
 /// - Key: duration-weighted pitch-class histogram vs Krumhansl-Schmuckler profiles.
 /// - Grid: onsets/offsets snapped to 16ths; pitches gated to A0–C8.
 public enum Quantizer {
-    public static func quantize(_ events: [NoteEvent]) -> QuantizedScore {
+    /// Allowed assumed tempo range (quarter-note BPM).
+    public static let tempoRange: ClosedRange<Double> = 20...300
+
+    /// - Parameter tempoBPM: assumed quarter-note tempo. nil estimates it; a value skips tempo
+    ///   estimation (the grid phase, meter and key are still estimated). The tempo decides note
+    ///   values: the same audio at 2× the BPM reads as notes twice as long (eighths -> quarters).
+    public static func quantize(_ events: [NoteEvent], tempoBPM: Double? = nil) -> QuantizedScore {
         let notes = events
             .filter { $0.midi >= HearSheet.minMIDI && $0.midi <= HearSheet.maxMIDI && $0.offset > $0.onset }
             .sorted { $0.onset < $1.onset }
@@ -18,7 +24,13 @@ public enum Quantizer {
         }
 
         let onsets = notes.map(\.onset)
-        let (quarterLen, beatPhase) = estimateBeat(onsets: onsets)
+        let (quarterLen, beatPhase): (Double, Double)
+        if let bpm = tempoBPM {
+            let q = 60 / min(tempoRange.upperBound, max(tempoRange.lowerBound, bpm))
+            (quarterLen, beatPhase) = (q, bestPhase(onsets: onsets, quarterLen: q).phase)
+        } else {
+            (quarterLen, beatPhase) = estimateBeat(onsets: onsets)
+        }
         let (meter, barPhase) = estimateMeter(onsets: onsets, quarterLen: quarterLen, beatPhase: beatPhase)
         let key = estimateKey(notes: notes)
         let sixteenth = quarterLen / 4
@@ -67,25 +79,45 @@ public enum Quantizer {
         var best: (Double, Double) = (candidates[0], onsets[0])
         var bestScore = -1.0
         for q in candidates {
-            for anchor in onsets.prefix(3) {
-                let phase = anchor.truncatingRemainder(dividingBy: q)
-                var score = 0.0
-                for o in onsets {
-                    var d = (o - phase).truncatingRemainder(dividingBy: q)
-                    if d < 0 { d += q }
-                    d = min(d, q - d)
-                    let tol = 0.10 * q
-                    if d < tol { score += 1 - d / tol }
-                }
-                // Prefer tempi near 90 BPM when scores tie (mild prior).
-                score *= 1.0 + 0.05 * exp(-pow((60 / q - 90) / 60, 2))
-                if score > bestScore { bestScore = score; best = (q, phase) }
-            }
+            let (phase, raw) = bestPhase(onsets: onsets, quarterLen: q)
+            var score = raw
+            // Prefer tempi near 90 BPM when scores tie (mild prior).
+            score *= 1.0 + 0.05 * exp(-pow((60 / q - 90) / 60, 2))
+            if score > bestScore { bestScore = score; best = (q, phase) }
         }
-        // Normalize phase to sit at or before the first onset.
-        var (q, phase) = best
-        while phase > onsets[0] { phase -= q }
-        return (q, phase)
+        return best
+    }
+
+    /// Best beat-grid phase for a fixed quarter length (alignment of the first onsets),
+    /// normalized to sit at or before the first onset.
+    static func bestPhase(onsets: [Double], quarterLen q: Double) -> (phase: Double, score: Double) {
+        guard let first = onsets.first else { return (0, 0) }
+        var best = (phase: first, score: -1.0)
+        for anchor in onsets.prefix(3) {
+            let phase = anchor.truncatingRemainder(dividingBy: q)
+            var score = 0.0
+            for o in onsets {
+                var d = (o - phase).truncatingRemainder(dividingBy: q)
+                if d < 0 { d += q }
+                d = min(d, q - d)
+                let tol = 0.10 * q
+                if d < tol { score += 1 - d / tol }
+            }
+            if score > best.score { best = (phase, score) }
+        }
+        var phase = best.phase
+        while phase > first { phase -= q }
+        return (phase, best.score)
+    }
+
+    /// Approximate note events (seconds) from a quantized score, for takes saved before the
+    /// raw notes were kept.
+    public static func events(from score: QuantizedScore) -> [NoteEvent] {
+        score.notes.map { n in
+            NoteEvent(onset: Double(n.start16) * score.secondsPer16th,
+                      offset: Double(n.start16 + n.duration16) * score.secondsPer16th,
+                      midi: n.midi, velocity: n.velocity)
+        }
     }
 
     // MARK: - Meter

@@ -54,6 +54,17 @@ public enum MusicXMLWriter {
                     w.open("clef", attrs: ["number": "2"]); w.tag("sign", "F"); w.tag("line", "4"); w.close("clef")
                 }
                 w.close("attributes")
+                // Assumed tempo as a metronome mark (quarter = BPM) plus playback tempo.
+                let bpm = Int(score.tempoBPM.rounded())
+                w.open("direction", attrs: ["placement": "above"])
+                w.open("direction-type")
+                w.open("metronome")
+                w.tag("beat-unit", "quarter")
+                w.tag("per-minute", "\(bpm)")
+                w.close("metronome")
+                w.close("direction-type")
+                w.empty("sound", attrs: ["tempo": "\(bpm)"])
+                w.close("direction")
             }
             // Per-staff event streams; grand staff writes staff 1 then a backup then staff 2.
             var accidentalState = AccidentalState(key: score.key)

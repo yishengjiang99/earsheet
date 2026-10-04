@@ -154,7 +154,8 @@ final class ListeningSession: ObservableObject {
                                     title: "Take \(self.library.takes.count + 1)",
                                     createdAt: Date(),
                                     score: score,
-                                    isSample: false)
+                                    isSample: false,
+                                    events: notes)
                     self.pendingTake = take
                     self.phase = .done(take)
                     if self.triggers.canShowAuto(.saveLimit) {
@@ -164,7 +165,7 @@ final class ListeningSession: ObservableObject {
                         self.notice = "You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now."
                     }
                 } else {
-                    let take = self.library.addTake(score: score)
+                    let take = self.library.addTake(score: score, events: notes)
                     self.phase = .done(take)
                 }
             }
@@ -292,9 +293,9 @@ struct ListeningView: View {
             .frame(height: 4)
             .padding(.horizontal, 48)
 
-            LiveStaffView(notes: session.liveNotes, now: session.elapsed)
+            LivePianoRollView(notes: session.liveNotes, now: session.elapsed)
                 .frame(height: 220)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 12)
 
             HStack(spacing: 8) {
                 Circle().fill(Color.red).frame(width: 8, height: 8)
@@ -307,7 +308,7 @@ struct ListeningView: View {
             Spacer()
 
             if case .writing = session.phase {
-                ProgressView("Writing the page…")
+                ProgressView("Finishing the take…")
                     .padding(.bottom, 48)
             } else {
                 Button(action: { session.stop() }) {
@@ -360,80 +361,62 @@ struct ListeningView: View {
     }
 }
 
-// MARK: - Live staff
+// MARK: - Live piano roll
 
-/// A treble staff that draws detected notes as they arrive, scrolling in a
-/// rolling 10-second window (newest at the right edge, like the mockup).
-struct LiveStaffView: View {
+/// Live listening draws only a piano roll: detected notes as bars in a rolling 10-second window
+/// (newest at the right edge). No staff, tempo or key yet — those come from the whole-take
+/// analysis when the user asks for sheet music.
+struct LivePianoRollView: View {
     var notes: [NoteEvent]
     var now: Double
     var window: Double = 10
 
-    var body: some View {
-        Canvas { ctx, size in
-            let s: CGFloat = 13 // staff line spacing
-            let staffTop: CGFloat = 60
-            let clefW: CGFloat = 54
-            let bottomLine = staffTop + 4 * s
-
-            // Staff lines.
-            for l in 0..<5 {
-                let y = staffTop + CGFloat(l) * s
-                ctx.stroke(Path { p in
-                    p.move(to: CGPoint(x: 8, y: y))
-                    p.addLine(to: CGPoint(x: size.width - 8, y: y))
-                }, with: .color(Ink.ink.opacity(0.85)), lineWidth: 1)
-            }
-            // Treble clef (same glyph the Engraver uses).
-            ctx.draw(Text("𝄞").font(.system(size: s * 4.6)).foregroundStyle(Ink.ink),
-                     at: CGPoint(x: 14, y: staffTop - s * 1.1))
-
-            let t0 = now - window
-            for note in notes where note.onset >= t0 - 1 {
-                let x = clefW + CGFloat((note.onset - t0) / window) * (size.width - clefW - 12)
-                guard x >= clefW - 20, x <= size.width else { continue }
-                let step = diatonicStep(midi: note.midi) - diatonicStep(midi: 64)
-                let y = bottomLine - CGFloat(step) * s / 2
-                // Fade brand-new notes in.
-                let age = now - note.onset
-                let alpha = min(1, max(0.25, age / 0.6))
-
-                // Ledger lines.
-                if step > 8 || step < 0 {
-                    let lo = step > 8 ? 10 : step - (step % 2 != 0 ? 1 : 0)
-                    let hi = step > 8 ? step - (step % 2 != 0 ? 1 : 0) : -2
-                    if lo <= hi {
-                        for ls in stride(from: lo, through: hi, by: 2) {
-                            let ly = bottomLine - CGFloat(ls) * s / 2
-                            ctx.stroke(Path { p in
-                                p.move(to: CGPoint(x: x - 11, y: ly))
-                                p.addLine(to: CGPoint(x: x + 11, y: ly))
-                            }, with: .color(Ink.ink.opacity(alpha)), lineWidth: 1)
-                        }
-                    }
-                }
-
-                // Note head + stem.
-                let head = Path(ellipseIn: CGRect(x: x - 7, y: y - 5, width: 14, height: 10))
-                ctx.fill(head, with: .color(Ink.ink.opacity(alpha)))
-                let stemUp = step <= 4
-                let stemX = stemUp ? x + 6.4 : x - 6.4
-                let stemEndY = stemUp ? y - 3.2 * s : y + 3.2 * s
-                ctx.stroke(Path { p in
-                    p.move(to: CGPoint(x: stemX, y: y))
-                    p.addLine(to: CGPoint(x: stemX, y: stemEndY))
-                }, with: .color(Ink.ink.opacity(alpha)), lineWidth: 1.4)
-            }
+    /// Visible pitch rows: the window's notes ± 2, at least two octaves.
+    static func pitchRange(_ midis: [Int]) -> ClosedRange<Int> {
+        guard let lo = midis.min(), let hi = midis.max() else { return 55...79 }
+        var range = (lo - 2)...(hi + 2)
+        if range.count < 25 {
+            let pad = (25 - range.count + 1) / 2
+            range = (range.lowerBound - pad)...(range.upperBound + pad)
         }
-        .accessibilityLabel("Live transcription staff")
-        .accessibilityValue("\(notes.count) notes detected")
+        return max(21, range.lowerBound)...min(108, range.upperBound)
     }
 
-    /// Diatonic staff steps from C0 (C=0 … B=6 per octave).
-    private func diatonicStep(midi: Int) -> Int {
-        let pcs = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]
-        let octave = midi / 12 - 1
-        return octave * 7 + pcs[midi % 12]
+    var body: some View {
+        Canvas { ctx, size in
+            let t0 = now - window
+            let visible = notes.filter { $0.offset >= t0 - 0.5 || $0.onset >= t0 - 0.5 }
+            let range = Self.pitchRange(visible.map(\.midi))
+            let rows = CGFloat(range.count)
+            let rh = size.height / rows
+            let black: Set<Int> = [1, 3, 6, 8, 10]
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.96)))
+            for m in range where black.contains(((m % 12) + 12) % 12) {
+                let y = CGFloat(range.upperBound - m) * rh
+                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: rh)), with: .color(Color(white: 0.9)))
+            }
+            // C rows labelled so the octave is readable.
+            for m in range where m % 12 == 0 {
+                let y = CGFloat(range.upperBound - m) * rh
+                ctx.draw(Text("C\(m / 12 - 1)").font(.system(size: 9)).foregroundStyle(.secondary),
+                         at: CGPoint(x: 12, y: y + rh / 2))
+            }
+            func x(_ t: Double) -> CGFloat { CGFloat((t - t0) / window) * size.width }
+            for note in visible {
+                let end = min(now, max(note.offset, note.onset + 0.08))
+                let x0 = max(0, x(note.onset)), x1 = min(size.width, x(end))
+                guard x1 > 0, x0 < size.width else { continue }
+                let y = CGFloat(range.upperBound - note.midi) * rh
+                // Fade brand-new notes in.
+                let alpha = min(1, max(0.35, (now - note.onset) / 0.4))
+                ctx.fill(Path(roundedRect: CGRect(x: x0, y: y + rh * 0.1, width: max(3, x1 - x0), height: max(2, rh * 0.8)),
+                              cornerRadius: 2),
+                         with: .color(Color(red: 0.2, green: 0.45, blue: 0.85).opacity(alpha)))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityLabel("Live piano roll")
+        .accessibilityValue("\(notes.count) notes detected")
     }
 }
 

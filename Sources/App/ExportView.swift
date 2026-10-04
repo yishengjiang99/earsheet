@@ -6,6 +6,8 @@ import HearSheet
 /// MIDI + MusicXML locked behind Pro.
 struct ExportView: View {
     let take: Take
+    /// The analyzed sheet (assumed tempo, meter, key) — exports match the Page view.
+    let score: QuantizedScore
     @ObservedObject var proStore: ProStore
     @Environment(\.dismiss) private var dismiss
 
@@ -80,8 +82,8 @@ struct ExportView: View {
 
     /// Free tier PDF is the first 30 seconds only.
     private var pdfScore: QuantizedScore {
-        guard !proStore.isPro else { return take.score }
-        var s = take.score
+        guard !proStore.isPro else { return score }
+        var s = score
         let cutoff16 = Int(30.0 / s.secondsPer16th)
         s.notes = s.notes.filter { $0.start16 < cutoff16 }
         return s
@@ -111,19 +113,19 @@ struct ExportView: View {
 
     private func exportMIDI() {
         guard proStore.isPro else { showPaywall = true; return }
-        shareFile(name: "\(baseName).mid", data: MIDISupport.data(for: take.score))
+        shareFile(name: "\(baseName).mid", data: MIDISupport.data(for: score))
     }
 
     private func exportMusicXML() {
         guard proStore.isPro else { showPaywall = true; return }
-        shareFile(name: "\(baseName).musicxml", data: Data(MusicXMLWriter.xml(score: take.score).utf8))
+        shareFile(name: "\(baseName).musicxml", data: Data(MusicXMLWriter.xml(score: score).utf8))
     }
 
     private func exportMP3() {
         isPreparing = true
         Task {
             do {
-                let mp3 = try await AudioExporter.mp3Data(for: take.score)
+                let mp3 = try await AudioExporter.mp3Data(for: score)
                 shareFile(name: "\(baseName).mp3", data: mp3)
             } catch {
                 notice = "Could not render MP3: \(error.localizedDescription)"
@@ -133,7 +135,7 @@ struct ExportView: View {
     }
 
     private func exportPhoto() {
-        guard let image = SheetDetailView.photoImage(for: take.score),
+        guard let image = SheetDetailView.photoImage(for: score),
               let png = image.pngData() else {
             notice = "Could not render the photo."
             return
