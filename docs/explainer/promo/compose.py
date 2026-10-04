@@ -13,4 +13,4 @@ print('piano',mk(mel,0,'piano.mid'))
 gt=[]
 for ch in [(57,64,69,72),(53,60,65,69),(48,55,64,67),(55,62,67,71)]:
     for p in ch: gt.append((p,.5))
-print('guitar',mk(gt,24,'guitar.mid',bpm=132))
+print('guitar',mk(gt,24,'guitar.mid',bpm=120))

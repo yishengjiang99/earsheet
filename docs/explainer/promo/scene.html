@@ -178,6 +178,9 @@ function camFor(cx,cy,s,focus){ // focus=[lx,ly,sx,sy]: put logical point at scr
 function lerpCam(a,b,p){p=ease(clamp(p));return a.map((v,i)=>v+(b[i]-v)*p)}
 function tapAt(name,t,t0){const p=prog(t,t0,t0+.45);return(t>=t0&&t<t0+.45)?[...TAPS[name],p]:null}
 
+// live jump-cut: take time shown at video time t (segment A from a, jump to take j at cut c)
+function liveNow(t,start,cut,jump){return t<cut?Math.max(0,t-start):jump+(t-cut)}
+const ARW='<span style="font-family:Inter;font-weight:800">→</span>';
 function landing(t){
  const HOME=[1400,540,1.06], OFF=[2400,540,1.06];
  const ROLLZ=camFor(0,0,1.5,[196.5,300,1340,560]);
@@ -185,42 +188,42 @@ function landing(t){
  const ROLLD=camFor(0,0,1.45,[196.5,350,1320,560]);
  let st={screen:'list'},cam=HOME,cp=[],bga=0;
  const C=(html,a,b,opt={})=>{const p=popIn(t,a,b);if(p)cp.push({x:120,y:opt.y??330,w:opt.w??900,size:opt.size??96,html,...p,...opt})};
- if(t<2.55){bga=1-prog(t,2.2,2.55);cam=OFF;
-   const p1=popIn(t,0,2.55),p2=popIn(t,0.85,2.55);
+ if(t<2.5){bga=1-prog(t,2.2,2.5);cam=OFF;
+   const p1=popIn(t,0,2.5),p2=popIn(t,0.85,2.5);
    if(p1)cp.push({x:0,y:300,w:W,size:170,align:'center',origin:'center',html:'Play anything.',...p1});
    if(p2)cp.push({x:0,y:520,w:W,size:170,align:'center',origin:'center',html:'<span class="hl">See the notes.</span>',...p2});
- }else if(t<4.6){cam=lerpCam(OFF,HOME,prog(t,2.55,3.05));
-   C('Turn what you hear<br>into sheet music.<span class="sub" style="font-size:40px">In seconds. Right on your iPhone.</span>',2.6,4.6,{y:300});
- }else if(t<6.1){cam=lerpCam(HOME,[1400,470,1.18],prog(t,4.6,5.2));st.tap=tapAt('mic',t,5.25);
-   if(t>=5.65)st={trans:['list','listen',prog(t,5.65,6.05),'up']};
-   C(chip(1)+'Tap the mic.',4.65,6.1,{y:380,size:110});
- }else if(t<15.0){const now=Math.max(0,t-6.2);st={screen:'listen',live:[D.piano,Math.min(now,8.6)]};
-   cam=t<7?lerpCam([1400,470,1.18],ROLLZ,prog(t,6.1,7)):ROLLZ;
-   if(t>14.55)st.tap=tapAt('stop',t,14.55),cam=lerpCam(ROLLZ,HOME,prog(t,14.4,14.9));
-   C(chip(2)+'Play it.<span class="sub" style="font-size:40px">A riff, a melody, an idea.</span>',6.1,9.9,{y:340,size:120,w:700});
-   C('Watch every note<br>appear <span class="hl">live.</span>',9.9,15.0,{y:360,size:100,w:700});
- }else if(t<16.6){st=t<15.6?{trans:['listen','detail',prog(t,15.1,15.55)]}:{screen:'detail',tab:'roll'};cam=HOME;
-   C(chip(3)+'Stop.<br>Your take is saved.',15.05,16.6,{y:360,size:100});
- }else if(t<19.7){st={screen:'detail',tab:t<16.9?'roll':'page',analyzing:t>=16.9&&t<17.45,sheetReady:t>=17.45};st.tap=tapAt('page',t,16.6);
-   cam=t<17.5?HOME:lerpCam(HOME,STAFFZ,prog(t,17.5,18.1));
-   C('Sheet music,<br>when you want it.<span class="sub" style="font-size:38px">Tempo and key, worked out<br>from the whole take.</span>',16.65,19.7,{y:300,size:94,w:640});
- }else if(t<26.5){const play=t>=20.0?Math.min(t-20.0,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};
-   st.tap=tapAt('play',t,19.7);
-   cam=t<20.0?lerpCam(STAFFZ,HOME,prog(t,19.7,19.95)):(t<20.3?HOME:lerpCam(HOME,STAFFZ,prog(t,20.3,20.8)));
-   C(chip(4)+'Hear it back.<span class="sub" style="font-size:40px">Every note lights up<br>as it plays.</span>',19.75,26.5,{y:320,size:104,w:640});
- }else if(t<30.0){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,26.85,27.25)};st.tap=tapAt('share',t,26.55);
-   cam=t<26.8?lerpCam(STAFFZ,HOME,prog(t,26.5,26.8)):lerpCam(HOME,camFor(0,0,1.45,[196.5,740,1330,600]),prog(t,27.3,27.9));
-   C(chip(5)+'Share it.<span class="sub" style="font-size:42px">PDF, MIDI, MusicXML.</span>',26.55,30.0,{y:340,size:110});
- }else if(t<34.0){const now=Math.max(0,t-30.25);st={screen:'listen',live:[D.guitar,Math.min(now,4.6)]};cam=ROLLZ;
-   C('Guitar? <span class="hl">Yep.</span><span class="sub" style="font-size:42px">Pick it, strum it, see it.</span>',30.05,34.0,{y:360,size:120,w:700});
- }else if(t<40.4){
-   if(t<35.6){st={screen:'detail',tab:'page',sheetReady:true,play:2.6};cam=STAFFZ;C('Learn songs<br><span class="hl">by ear.</span>',34.0,35.6,{y:340,size:120,w:700})}
-   else if(t<37.2){st={screen:'list',newTake:1-prog(t,36.6,37.2)*0.5};cam=camFor(0,0,1.6,[196.5,330,1330,540]);C('Catch ideas<br>before they’re <span class="hl">gone.</span>',35.6,37.2,{y:340,size:110,w:700})}
-   else if(t<38.8){st={screen:'detail',tab:'roll',play:3+(t-37.2)};cam=ROLLD;C('Practice it,<br><span class="hl">note by note.</span>',37.2,38.8,{y:340,size:120,w:700})}
-   else{st={screen:'listen',live:[D.piano,8.6]};cam=ROLLZ;C('Noisy room?<span class="sub" style="font-size:44px">A built-in noise gate keeps<br>the hum out of your notes.</span>',38.8,40.4,{y:330,size:120,w:700})}
- }else{const p=prog(t,40.4,41.0);st={screen:'list',newTake:.5};cam=lerpCam(ROLLZ,[1440,540,1.0],p);bga=0.5*p;
-   const q=popIn(t,40.5,99);if(q)cp.push({x:120,y:250,w:900,size:104,html:`<img src="../../../Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" style="width:150px;height:150px;border-radius:34px;box-shadow:0 14px 30px rgba(80,30,10,.3);display:block;margin-bottom:34px">AI Music Radar<span class="sub" style="font-size:46px;color:#2a1610">Play it. See it.</span>`,...q});
-   const r=popIn(t,41.2,99);if(r)cp.push({x:120,y:735,w:900,size:40,html:`<span style="display:inline-block;background:#0c6b6b;color:#fff;border-radius:40px;padding:16px 40px;font-size:44px;letter-spacing:-.5px">Try it free</span><span class="sub" style="font-size:34px;margin-top:22px">Coming soon on the App Store<br>grepawk.com/music-radar</span>`,...r});
+ }else if(t<4.5){cam=lerpCam(OFF,HOME,prog(t,2.5,3.0));
+   C('Turn what you hear<br>into sheet music.<span class="sub" style="font-size:40px">In seconds. Right on your iPhone.</span>',2.55,4.5,{y:300});
+ }else if(t<6.0){cam=lerpCam(HOME,[1400,470,1.18],prog(t,4.5,5.0));st.tap=tapAt('mic',t,5.05);
+   if(t>=5.5)st={trans:['list','listen',prog(t,5.5,5.95),'up']};
+   C(chip(1)+'Tap the mic.',4.55,6.0,{y:380,size:110});
+ }else if(t<10.75){const now=Math.min(8.6,liveNow(t,6.0,8.0,6.0));st={screen:'listen',live:[D.piano,now]};
+   cam=t<6.6?lerpCam([1400,470,1.18],ROLLZ,prog(t,6.0,6.6)):ROLLZ;
+   if(t>=8.0&&t<8.25){const k=1+0.06*(1-prog(t,8.0,8.25));cam=[cam[0],cam[1],cam[2]*k]}
+   if(t>10.3){st.tap=tapAt('stop',t,10.3);cam=lerpCam(ROLLZ,HOME,prog(t,10.25,10.7))}
+   C(chip(2)+'Play it.<span class="sub" style="font-size:40px">A riff, a melody, an idea.</span>',6.0,8.0,{y:340,size:120,w:700});
+   C('Watch every note<br>appear <span class="hl">live.</span>',8.0,10.75,{y:360,size:100,w:700});
+ }else if(t<12.3){st=t<11.3?{trans:['listen','detail',prog(t,10.85,11.25)]}:{screen:'detail',tab:'roll'};cam=HOME;
+   C(chip(3)+'Stop.<br>Your take is saved.',10.8,12.3,{y:360,size:100});
+ }else if(t<15.5){st={screen:'detail',tab:t<12.6?'roll':'page',analyzing:t>=12.6&&t<13.15,sheetReady:t>=13.15};st.tap=tapAt('page',t,12.3);
+   cam=t<13.2?HOME:lerpCam(HOME,STAFFZ,prog(t,13.2,13.8));
+   C('Sheet music,<br>when you want it.<span class="sub" style="font-size:38px">Tempo and key, worked out<br>from the whole take.</span>',12.35,15.5,{y:300,size:94,w:640});
+ }else if(t<21.5){const play=t>=16.0?Math.min(t-16.0,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};
+   st.tap=tapAt('play',t,15.5);
+   cam=t<15.8?lerpCam(STAFFZ,HOME,prog(t,15.5,15.75)):(t<16.1?HOME:lerpCam(HOME,STAFFZ,prog(t,16.1,16.6)));
+   C(chip(4)+'Hear it back.<span class="sub" style="font-size:40px">Every note lights up<br>as it plays.</span>',15.55,21.5,{y:320,size:104,w:640});
+ }else if(t<25.0){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,21.85,22.25)};st.tap=tapAt('share',t,21.55);
+   cam=t<21.8?lerpCam(STAFFZ,HOME,prog(t,21.5,21.8)):lerpCam(HOME,camFor(0,0,1.45,[196.5,740,1330,600]),prog(t,22.3,22.9));
+   C(chip(5)+'Share it<br>as a PDF.<span class="sub" style="font-size:42px">MIDI &amp; MusicXML with Pro.</span>',21.55,25.0,{y:320,size:110,w:700});
+ }else if(t<29.0){const now=Math.max(0,t-25.5);st={screen:'listen',live:[D.guitar,Math.min(now,4.6)]};cam=ROLLZ;
+   C('Guitar? <span class="hl">Yep.</span><span class="sub" style="font-size:42px">Pick it, strum it, see it.</span>',25.05,29.0,{y:360,size:120,w:700});
+ }else if(t<34.7){
+   if(t<30.9){st={screen:'detail',tab:'page',sheetReady:true,play:2.6};cam=STAFFZ;C('Learn songs<br><span class="hl">by ear.</span>',29.0,30.9,{y:340,size:120,w:700})}
+   else if(t<32.8){st={screen:'list',newTake:1-prog(t,32.0,32.8)*0.5};cam=camFor(0,0,1.6,[196.5,330,1330,540]);C('Catch ideas<br>before they’re <span class="hl">gone.</span>',30.9,32.8,{y:340,size:110,w:700})}
+   else{st={screen:'detail',tab:'roll',play:3+(t-32.8)};cam=ROLLD;C('Practice it,<br><span class="hl">note by note.</span>',32.8,34.7,{y:340,size:120,w:700})}
+ }else{const p=prog(t,34.7,35.3);st={screen:'list',newTake:.5};cam=lerpCam(ROLLD,[1440,540,1.0],p);bga=0.5*p;
+   const q=popIn(t,34.8,99);if(q)cp.push({x:120,y:250,w:900,size:104,html:`<img src="../../../Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" style="width:150px;height:150px;border-radius:34px;box-shadow:0 14px 30px rgba(80,30,10,.3);display:block;margin-bottom:34px">AI Music Radar<span class="sub" style="font-size:46px;color:#2a1610">Play it. See it.</span>`,...q});
+   const r=popIn(t,35.5,99);if(r)cp.push({x:120,y:735,w:900,size:40,html:`<span style="display:inline-block;background:#0c6b6b;color:#fff;border-radius:40px;padding:16px 40px;font-size:44px;letter-spacing:-.5px">Try it free</span><span class="sub" style="font-size:34px;margin-top:22px">Coming soon on the App Store<br>grepawk.com/music-radar</span>`,...r});
  }
  return {st,cam,cp,bga};
 }
@@ -231,32 +234,33 @@ function tiktok(t){
  const STAFFZ=camFor(0,0,2.25,[196.5,322,490,1170]);
  let st={screen:'list'},cam=HOME,cp=[],bga=0;
  const C=(html,a,b,opt={})=>{const p=popIn(t,a,b);if(p)cp.push({x:70,y:opt.y??170,w:780,size:opt.size??84,align:'center',origin:'center top',html:`<span class="tt">${html}</span>`,...p,...opt})};
- const first=t<0.05?{o:1,s:1,dy:0}:null;
+ const POV='<span class="tt">POV: you hear a song and want the <span class="hl">sheet music</span></span>';
  if(t<2.5){st.tap=tapAt('mic',t,1.85);if(t>=2.15)st={trans:['list','listen',prog(t,2.15,2.5),'up']};
-   const p=first||popIn(t,0,2.5);if(p)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:'<span class="tt">POV: you hear a song and want the <span class="hl">sheet music</span></span>',...p,o:1,s:Math.max(p.s,.97),dy:0});
- }else if(t<11.2){const now=Math.max(0,t-2.6);st={screen:'listen',live:[D.piano,Math.min(now,8.6)]};
-   cam=t<3.5?lerpCam(HOME,ROLLZ,prog(t,2.6,3.4)):ROLLZ;
-   if(t>10.75){st.tap=tapAt('stop',t,10.75);cam=lerpCam(ROLLZ,HOME,prog(t,10.6,11.0))}
-   C('so you just…<br><span class="hl">play&nbsp;it</span>&nbsp;🎹',2.5,5.8,{size:84});
-   C('and the notes show up <span class="hl">LIVE</span> 👀',5.8,11.2,{size:82});
- }else if(t<14.0){st=t<11.7?{trans:['listen','detail',prog(t,11.25,11.65)]}:{screen:'detail',tab:t<12.1?'roll':'page',analyzing:t>=12.1&&t<12.55,sheetReady:t>=12.55};
-   st.tap=tapAt('page',t,11.85);cam=t<12.6?HOME:lerpCam(HOME,STAFFZ,prog(t,12.6,13.1));
-   C('tap Page →<br><span class="hl">real sheet music</span> ✨',11.2,14.0,{size:82});
- }else if(t<19.6){const play=t>=14.35?Math.min(t-14.35,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};st.tap=tapAt('play',t,14.0);
-   cam=t<14.3?lerpCam(STAFFZ,HOME,prog(t,14.0,14.25)):(t<14.6?HOME:lerpCam(HOME,STAFFZ,prog(t,14.6,15.0)));
-   C('it even plays<br>it <span class="hl">back</span>&nbsp;🔊',14.0,19.6,{size:84});
- }else if(t<21.7){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,19.95,20.3)};st.tap=tapAt('share',t,19.65);
-   cam=t<19.9?lerpCam(STAFFZ,HOME,prog(t,19.6,19.9)):lerpCam(HOME,camFor(0,0,1.6,[196.5,740,500,1250]),prog(t,20.3,20.8));
-   C('export <span class="hl">PDF · MIDI</span><br>MusicXML',19.65,21.7,{size:84});
- }else{st=t<22.1?{trans:['detail','list',prog(t,21.7,22.05)]}:{screen:'list',newTake:1};cam=HOME;
-   const fade=prog(t,23.6,24.0);
-   const q=popIn(t,21.75,99);if(q)q.o*=(1-fade);
+   const p=t<0.05?{o:1,s:1,dy:0}:popIn(t,0,2.5);if(p)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:POV,...p,o:1,s:Math.max(p.s,.97),dy:0});
+ }else if(t<6.85){const now=Math.min(8.6,liveNow(t,2.5,4.5,6.5));st={screen:'listen',live:[D.piano,now]};
+   cam=t<3.2?lerpCam(HOME,ROLLZ,prog(t,2.5,3.1)):ROLLZ;
+   if(t>=4.5&&t<4.75){const k=1+0.06*(1-prog(t,4.5,4.75));cam=[cam[0],cam[1],cam[2]*k]}
+   if(t>6.35){st.tap=tapAt('stop',t,6.35);cam=lerpCam(ROLLZ,HOME,prog(t,6.3,6.75))}
+   C('so you just…<br><span class="hl">play&nbsp;it</span>&nbsp;🎹',2.45,4.5,{size:84});
+   C('and the notes show up <span class="hl">LIVE</span>&nbsp;👀',4.5,6.85,{size:82});
+ }else if(t<9.6){st=t<7.3?{trans:['listen','detail',prog(t,6.9,7.25)]}:{screen:'detail',tab:t<7.75?'roll':'page',analyzing:t>=7.75&&t<8.2,sheetReady:t>=8.2};
+   st.tap=tapAt('page',t,7.45);cam=t<8.25?HOME:lerpCam(HOME,STAFFZ,prog(t,8.25,8.75));
+   C('tap Page '+ARW+'<br><span class="hl">real&nbsp;sheet&nbsp;music</span>&nbsp;✨',6.85,9.6,{size:72});
+ }else if(t<14.6){const play=t>=10.0?Math.min(t-10.0,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};st.tap=tapAt('play',t,9.6);
+   cam=t<9.9?lerpCam(STAFFZ,HOME,prog(t,9.6,9.85)):(t<10.2?HOME:lerpCam(HOME,STAFFZ,prog(t,10.2,10.6)));
+   C('it even plays<br>it <span class="hl">back</span>&nbsp;🔊',9.6,14.6,{size:84});
+ }else if(t<16.6){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,14.95,15.3)};st.tap=tapAt('share',t,14.65);
+   cam=t<14.9?lerpCam(STAFFZ,HOME,prog(t,14.6,14.9)):lerpCam(HOME,camFor(0,0,1.6,[196.5,740,500,1250]),prog(t,15.3,15.8));
+   C('<span style="white-space:nowrap">export <span class="hl">PDF • MIDI • MusicXML</span></span>',14.65,16.6,{size:52,y:200});
+ }else{st=t<17.0?{trans:['detail','list',prog(t,16.6,16.95)]}:{screen:'list',newTake:1};cam=HOME;
+   const fade=prog(t,18.6,19.0);
+   const q=popIn(t,16.65,99);if(q)q.o*=(1-fade);
    if(q)cp.push({x:70,y:120,w:780,size:88,align:'center',origin:'center top',html:`<img src="../../../Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" style="width:120px;height:120px;border-radius:28px;display:block;margin:0 auto 18px;box-shadow:0 10px 24px rgba(80,30,10,.3)">AI Music Radar<span class="sub" style="font-size:40px;color:#2a1610">try it free · coming soon<br>on the App Store</span>`,...q});
-   const z=t>=23.65?{o:fade,s:1,dy:0}:null;if(z)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:'<span class="tt">POV: you hear a song and want the <span class="hl">sheet music</span></span>',...z});
+   if(t>=18.65)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:POV,o:fade,s:1,dy:0});
  }
  return {st,cam,cp,bga};
 }
 window.renderAt=function(t){const r=(MODE==='tiktok'?tiktok:landing)(t);phone(r.st);camera(...r.cam);caps(r.cp);bgRoll(t,r.bga)};
-window.DUR=MODE==='tiktok'?24.0:45.0;
+window.DUR=MODE==='tiktok'?19.0:39.5;
 renderAt(0);
 </script></body></html>

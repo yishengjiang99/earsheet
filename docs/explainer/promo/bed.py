@@ -1,5 +1,5 @@
 import pretty_midi as pm, sys
-bars=int(sys.argv[1]); out=sys.argv[2]; bpm=120; b=0.5; B=4*b
+bars=int(sys.argv[1]); out=sys.argv[2]; stem=sys.argv[3] if len(sys.argv)>3 else 'full'; bpm=120; b=0.5; B=4*b
 m=pm.PrettyMIDI(initial_tempo=bpm)
 dr=pm.Instrument(0,is_drum=True); bass=pm.Instrument(38); keys=pm.Instrument(4); pad=pm.Instrument(89)
 prog=[(48,[60,64,67]),(45,[57,60,64]),(41,[57,60,65]),(43,[55,59,62])]  # C Am F G
@@ -19,4 +19,4 @@ for k in range(bars):
     for q in range(4):
         for p in ch: n(keys,70,p+12,t+q*b+b/2,b*0.35)
     for p in ch: n(pad,45,p,t,B)
-m.instruments+= [dr,bass,keys,pad]; m.write(out)
+m.instruments+= [dr] if stem=='drums' else [dr,bass,keys,pad]; m.write(out)

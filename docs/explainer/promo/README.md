@@ -1,7 +1,7 @@
 # Promo video build (landing + TikTok)
 
-Sources for `../ai-music-radar-landing.mp4` (1920×1080, 45 s) and `../ai-music-radar-tiktok.mp4`
-(1080×1920, 24 s). Every note on screen is a real transcription, not drawn by hand:
+Sources for `../ai-music-radar-landing.mp4` (1920×1080, 39.5 s) and `../ai-music-radar-tiktok.mp4`
+(1080×1920, 19 s). Every note on screen is a real transcription, not drawn by hand:
 
 1. `compose.py` writes a short original melody (`piano.mid`, 4 bars @ 120 BPM, C/Am) and a guitar
    arpeggio (`guitar.mid`). These are rendered with FluidSynth (Salamander Grand Piano / Spanish Classical
@@ -10,7 +10,7 @@ Sources for `../ai-music-radar-landing.mp4` (1920×1080, 45 s) and `../ai-music-
    transcribed note table, which becomes `data.js`. The page view uses the web demo's own ABC output
    (`piano.abc`, treble voice only) rendered with abcjs.
 3. `bed.py` writes the music bed: an original drum, bass, keys and pad loop (C–Am–F–G, 120 BPM) rendered with
-   FluidR3_GM, so it's royalty-free. `mix.py` ducks the bed under the demo audio and adds tap clicks. The
+   FluidR3_GM, so it's royalty-free. `mix.py` swaps the bed to a drums-only stem (`bed.py N out.mid drums`) under the demo audio, jump-cuts the live take on a beat and adds tap clicks. The
    playback audio is the transcribed notes re-synthesized.
 4. `scene.html?mode=landing|tiktok` is a deterministic `renderAt(t)` scene: a phone mock of the app's
    Listening / Take (Piano roll / Page) / Export screens, matching `Sources/App`, plus captions. `render.py`
