@@ -57,7 +57,7 @@ final class StaffRenderView: UIView {
         Engraver.draw(score: score, page: page, in: ctx, flipped: false)
         if !highlighted.isEmpty {
             ctx.setFillColor(UIColor.systemYellow.withAlphaComponent(0.45).cgColor)
-            for n in page.notes where highlighted.contains(n.noteIndex) {
+            for n in page.notes + page.tiedSegments where highlighted.contains(n.noteIndex) {
                 ctx.fillEllipse(in: n.frame.insetBy(dx: -4, dy: -4))
             }
         }

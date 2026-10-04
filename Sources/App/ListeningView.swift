@@ -163,14 +163,10 @@ final class ListeningSession: ObservableObject {
                                     score: score,
                                     isSample: false,
                                     events: notes)
+                    // Shown in place with a non-blocking "Not saved" banner (no alert or auto
+                    // paywall over the take); the paywall opens from the banner.
                     self.pendingTake = take
                     self.phase = .done(take)
-                    if self.triggers.canShowAuto(.saveLimit) {
-                        self.triggers.recordAutoShown(.saveLimit)
-                        self.saveLimitReached = true
-                    } else {
-                        self.notice = "You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now."
-                    }
                 } else {
                     let take = self.library.addTake(score: score, events: notes)
                     self.phase = .done(take)
@@ -180,6 +176,23 @@ final class ListeningSession: ObservableObject {
     }
 
     func clearNotice() { notice = nil }
+
+    /// Records again in place (re-record from a held take): the unsaved take is discarded.
+    func restart() {
+        stopTimer()
+        recorder.onSamples = nil
+        recorder.onLevel = nil
+        if case .listening = phase { _ = recorder.stop() }
+        pendingTake = nil
+        saveLimitReached = false
+        notice = nil
+        liveNotes = []
+        elapsed = 0
+        level = 0
+        streamer = nil
+        phase = .preparing
+        start()
+    }
 
     /// True while the finished take is held by the free save limit (not in the library yet).
     var holdsPendingTake: Bool { pendingTake != nil }
@@ -221,6 +234,7 @@ struct ListeningView: View {
     /// opens the take (Library > Take), so back never returns to listening.
     var onSaved: ((Take) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmReRecord = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -346,7 +360,18 @@ struct ListeningView: View {
     @ViewBuilder
     private func doneBody(take: Take) -> some View {
         if showsHeldTake {
-            SheetDetailView(take: take, library: session.library, proStore: proStore)
+            SheetDetailView(take: take, library: session.library, proStore: proStore,
+                            onRecord: { confirmReRecord = true })
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    HeldTakeBanner { session.saveLimitReached = true }
+                }
+                .confirmationDialog("This take isn't saved", isPresented: $confirmReRecord, titleVisibility: .visible) {
+                    Button("Record a new take", role: .destructive) { session.restart() }
+                    Button("Keep this one with Pro") { session.saveLimitReached = true }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Free keeps \(ProStore.freeSaveLimit) pieces. Recording again replaces this unsaved take.")
+                }
         } else {
             Color.clear
         }
@@ -424,6 +449,37 @@ struct LivePianoRollView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .accessibilityLabel("Live piano roll")
         .accessibilityValue("\(notes.count) notes detected")
+    }
+}
+
+// MARK: - Held take banner
+
+/// Non-blocking notice on a take held by the free save limit (the take stays fully visible).
+struct HeldTakeBanner: View {
+    var onKeep: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "tray.full")
+                .foregroundStyle(Ink.teal)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Not saved yet")
+                    .font(.subheadline.weight(.semibold))
+                Text("Free keeps \(ProStore.freeSaveLimit) pieces. You can still play and export it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button("Keep it", action: onKeep)
+                .buttonStyle(.borderedProminent)
+                .tint(Ink.teal)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Ink.teal.opacity(0.08))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("heldTake.banner")
     }
 }
 

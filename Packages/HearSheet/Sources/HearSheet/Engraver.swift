@@ -24,6 +24,13 @@ public enum Engraver {
         /// 0 = treble, 1 = bass.
         public var staff: Int
         public var ledgerLineCount: Int
+        public var stemUp: Bool = true
+        public var stemX: CGFloat = 0
+        /// Far end of the stem (nil for whole notes).
+        public var stemEndY: CGFloat?
+        /// Flags on an unbeamed 8th (1) or 16th (2).
+        public var flags: Int = 0
+        public var system: Int = 0
     }
 
     public struct MeasureFrame {
@@ -44,6 +51,15 @@ public enum Engraver {
         public var isGrandStaff: Bool
         /// Horizontal span of each measure (left edge of its note area to its right barline).
         public var measures: [MeasureFrame]
+        /// Later segments of notes split by barlines or into writable lengths (tied to the first).
+        public var tiedSegments: [EngravedNote]
+        /// Accidentals drawn per note (first segment), for tests and accessibility.
+        public var accidentals: [(noteIndex: Int, glyph: String, center: CGPoint)]
+        /// Key-signature accidentals of the first system: (staff, staff position in diatonic
+        /// steps above the bottom line, glyph).
+        public var keySignature: [(staff: Int, position: Int, glyph: String, x: CGFloat)]
+        /// Ties as (start x, end x, y).
+        public var ties: [(x0: CGFloat, x1: CGFloat, y: CGFloat)]
         /// Metronome mark drawn above the first system (nil unless `Style.tempoMark`).
         public var tempoMarkText: String?
         /// Internal layout used by `draw`.
@@ -71,10 +87,20 @@ public enum Engraver {
 
     public static func layout(score: QuantizedScore, width: CGFloat, style: Style = Style()) -> Page {
         let l = Layout(score: score, width: width, style: style)
+        func engraved(_ e: NoteEntry) -> EngravedNote {
+            EngravedNote(noteIndex: e.noteIndex, headCenter: e.head, frame: e.frame, staff: e.staff,
+                         ledgerLineCount: e.ledgerYs.count, stemUp: e.stemUp, stemX: e.stemX,
+                         stemEndY: e.stemmed ? e.stemEndY : nil, flags: e.flags, system: e.system)
+        }
         return Page(size: l.size,
-                    notes: l.noteEntries.map { EngravedNote(noteIndex: $0.noteIndex, headCenter: $0.head, frame: $0.frame,
-                                                            staff: $0.staff, ledgerLineCount: $0.ledgerYs.count) },
+                    notes: l.noteEntries.filter { $0.segment == 0 }.map(engraved),
                     systemFrames: l.systemFrames, isGrandStaff: l.grandStaff, measures: l.measures,
+                    tiedSegments: l.noteEntries.filter { $0.segment > 0 }.map(engraved),
+                    accidentals: l.noteEntries.compactMap { e in
+                        e.accidental.map { (e.noteIndex, $0.glyph, CGPoint(x: e.accidentalX, y: e.head.y)) }
+                    },
+                    keySignature: l.keySig.filter { $0.system == 0 }.map { ($0.staff, $0.position, $0.glyph.glyph, $0.x) },
+                    ties: l.ties.map { ($0.x0, $0.x1, $0.y) },
                     tempoMarkText: l.tempoMark?.text, layout: l)
     }
 
@@ -107,32 +133,116 @@ public enum Engraver {
 
 // MARK: - Layout
 
+enum Accidental {
+    case sharp, flat, natural
+    var glyph: String { switch self { case .sharp: "♯"; case .flat: "♭"; case .natural: "♮" } }
+    init?(alter: Int) {
+        switch alter { case 1: self = .sharp; case -1: self = .flat; case 0: self = .natural; default: return nil }
+    }
+}
+
 private struct NoteEntry {
     var noteIndex: Int
     var head: CGPoint
     var frame: CGRect
     var staff: Int // 0 treble, 1 bass
-    var accidental: String?
+    /// Diatonic steps above the staff's bottom line (0 = bottom line, 8 = top line).
+    var pos: Int
+    var accidental: Accidental?
+    var accidentalX: CGFloat // accidental center
     var stemUp: Bool
     var stemX: CGFloat
     var stemEndY: CGFloat // far end of the stem
     var ledgerYs: [CGFloat]
-    var chordShift: CGFloat // extra x for seconds
     var dots: Int
+    var dotX: CGFloat
     var filled: Bool
     var stemmed: Bool // whole notes have no stem
     var beamID: Int? // index into Layout.beamGroups
-    var flagged: Bool // unbeamed 8th/16th: draw a flag
-    var tieStart: Bool
-    var tieStop: Bool
-    var tieStartX: CGFloat // x where the tie arc begins (right of head)
+    var flags: Int // unbeamed 8th = 1, 16th = 2
+    var segment: Int // 0 = first segment of the note; later segments are tied to the previous
+    var lastSegment: Bool
+    var system: Int
 }
 
 private struct BeamGroup {
     var staff: Int
     var stemUp: Bool
-    var indices: [Int] // NoteEntry indices
+    var indices: [Int] // NoteEntry indices, in time order
     var level: Int // 1 = eighth beam, 2 = sixteenth second beam
+}
+
+private struct Tie { var x0: CGFloat; var x1: CGFloat; var y: CGFloat; var below: Bool }
+
+private struct KeyGlyph { var x: CGFloat; var y: CGFloat; var glyph: Accidental; var staff: Int; var system: Int; var position: Int }
+
+/// A note piece within one bar with a writable length; notes crossing barlines or with lengths
+/// like 5 or 7 sixteenths become several segments joined by ties.
+private struct Segment {
+    var noteIndex: Int
+    var staff: Int
+    var start16: Int
+    var duration16: Int
+    var index: Int
+    var last: Bool
+}
+
+/// Pitch spelled in the key: letter step (0 = C … 6 = B), alteration, diatonic number.
+private struct Spelled { var step: Int; var alter: Int; var dia: Int }
+
+private enum Notation {
+    static let naturalPC = [0, 2, 4, 5, 7, 9, 11]
+    static let sharpOrder = [3, 0, 4, 1, 5, 2, 6] // F C G D A E B
+    static let flatOrder = [6, 2, 5, 1, 4, 0, 3] // B E A D G C F
+
+    static func keyAlter(step: Int, fifths: Int) -> Int {
+        if fifths > 0, sharpOrder.prefix(fifths).contains(step) { return 1 }
+        if fifths < 0, flatOrder.prefix(-fifths).contains(step) { return -1 }
+        return 0
+    }
+
+    /// Diatonic spelling in the key when the pitch is in the key (E♯ in F♯ major), else sharps in
+    /// sharp keys / C major and flats in flat keys.
+    static func spell(midi: Int, fifths: Int) -> Spelled {
+        let pc = ((midi % 12) + 12) % 12
+        var chosen: (Int, Int)?
+        for step in 0..<7 {
+            var a = pc - naturalPC[step]
+            if a > 6 { a -= 12 }
+            if a < -6 { a += 12 }
+            if abs(a) <= 1, a == keyAlter(step: step, fifths: fifths) { chosen = (step, a); break }
+        }
+        if chosen == nil {
+            let sharp: [(Int, Int)] = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1), (4, 0), (4, 1), (5, 0), (5, 1), (6, 0)]
+            let flat: [(Int, Int)] = [(0, 0), (1, -1), (1, 0), (2, -1), (2, 0), (3, 0), (4, -1), (4, 0), (5, -1), (5, 0), (6, -1), (6, 0)]
+            chosen = fifths >= 0 ? sharp[pc] : flat[pc]
+        }
+        let (step, alter) = chosen!
+        let naturalMidi = midi - alter
+        let octave = Int((Double(naturalMidi) / 12).rounded(.down)) - 1
+        return Spelled(step: step, alter: alter, dia: octave * 7 + step)
+    }
+
+    /// Diatonic number of each staff's bottom line: E4 (treble), G2 (bass).
+    static func bottomLineDia(staff: Int) -> Int { staff == 0 ? 4 * 7 + 2 : 2 * 7 + 4 }
+
+    /// Standard key-signature positions (steps above the bottom line), in order.
+    static func keySignature(fifths: Int, staff: Int) -> [(Accidental, Int)] {
+        let trebleSharps = [8, 5, 9, 6, 3, 7, 4] // F5 C5 G5 D5 A4 E5 B4
+        let trebleFlats = [4, 7, 3, 6, 2, 5, 1] // B4 E5 A4 D5 G4 C5 F4
+        let bassSharps = [6, 3, 7, 4, 1, 5, 2] // F3 C3 G3 D3 A2 E3 B2
+        let bassFlats = [2, 5, 1, 4, 0, 3, -1] // B2 E3 A2 D3 G2 C3 F2
+        if fifths > 0 { return (staff == 0 ? trebleSharps : bassSharps).prefix(min(7, fifths)).map { (.sharp, $0) } }
+        if fifths < 0 { return (staff == 0 ? trebleFlats : bassFlats).prefix(min(7, -fifths)).map { (.flat, $0) } }
+        return []
+    }
+
+    /// Largest writable value starting at `at` (16ths into the bar) within `remaining`.
+    static func writableValue(at: Int, remaining: Int, perBar: Int) -> Int {
+        for (v, align) in [(16, 16), (12, 4), (8, 4), (6, 2), (4, 2), (3, 1), (2, 1), (1, 1)]
+        where v <= remaining && v <= perBar && at % align == 0 { return v }
+        return 1
+    }
 }
 
 private struct Layout {
@@ -143,56 +253,194 @@ private struct Layout {
     let barlines: [(x: CGFloat, y0: CGFloat, y1: CGFloat, final: Bool)]
     let grandStaff: Bool
     let clefs: [(x: CGFloat, y: CGFloat, glyph: String, size: CGFloat, staff: Int, system: Int)]
-    let keySig: [(x: CGFloat, y: CGFloat, glyph: String, staff: Int, system: Int)]
+    let keySig: [KeyGlyph]
     let timeSig: [(x: CGFloat, y: CGFloat, text: String, staff: Int, system: Int)]
     let braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)]
+    let ties: [Tie]
     let systemFrames: [CGRect]
     let measures: [Engraver.MeasureFrame]
     let tempoMark: (x: CGFloat, y: CGFloat, text: String)?
 
+    static let headHalf: CGFloat = 0.62 // × staff space (visual half width of a notehead)
+    static let headShift: CGFloat = 1.2 // × staff space (second-interval column offset)
+    static let accColumn: CGFloat = 1.05 // × staff space (one accidental column)
+    static let keyStep: CGFloat = 1.0 // × staff space between key-signature accidentals
+
     init(score: QuantizedScore, width: CGFloat, style: Engraver.Style) {
         let s = style.staffSpace
+        let hh = Self.headHalf * s
         let grand = GrandStaff.isNeeded(score)
         self.grandStaff = grand
         // Staff per note from pitch (split at middle C), not the stored `staff`.
         let staffOf: [Int] = score.notes.map { grand ? GrandStaff.staff(forMidi: $0.midi) : 0 }
         let stavesPerSystem = grand ? 2 : 1
+        let fifths = score.key.fifths
+        let perBar = score.meter.beatsPerBar * 16 / score.meter.beatUnit
+        let beat16 = 16 / score.meter.beatUnit
+        let lastEnd = score.notes.map { $0.start16 + max(1, $0.duration16) }.max() ?? 0
+        let barCount = max(1, (lastEnd + perBar - 1) / perBar)
 
-        let sixteenthsPerBar = score.meter.beatsPerBar * 16 / score.meter.beatUnit
-        let lastEnd = score.notes.map { $0.start16 + $0.duration16 }.max() ?? 0
-        let barCount = max(1, (lastEnd + sixteenthsPerBar - 1) / sixteenthsPerBar)
+        // Spelling and staff position per note.
+        let spelled = score.notes.map { Notation.spell(midi: $0.midi, fifths: fifths) }
+        let posOf: [Int] = score.notes.indices.map { spelled[$0].dia - Notation.bottomLineDia(staff: staffOf[$0]) }
 
-        // Measure widths from content density.
-        var onsetsPerBar = [Int](repeating: 0, count: barCount)
-        for n in score.notes {
-            let b = min(barCount - 1, n.start16 / sixteenthsPerBar)
-            onsetsPerBar[b] += 1
+        // Segments (bar- and value-split notes).
+        var segs: [Segment] = []
+        for (i, n) in score.notes.enumerated() {
+            var at = n.start16
+            let end = n.start16 + max(1, n.duration16)
+            var k = 0
+            while at < end {
+                let barStart = (at / perBar) * perBar
+                let v = Notation.writableValue(at: at - barStart, remaining: min(end, barStart + perBar) - at, perBar: perBar)
+                segs.append(Segment(noteIndex: i, staff: staffOf[i], start16: at, duration16: v, index: k, last: false))
+                at += v
+                k += 1
+            }
+            segs[segs.count - 1].last = true
         }
+
+        // Accidentals: per staff position within the bar (so no courtesy/redundant naturals in
+        // other octaves); tied continuations carry none.
+        var accOf = [Accidental?](repeating: nil, count: segs.count)
+        var accState: [String: Int] = [:]
+        for si in segs.indices.sorted(by: { (segs[$0].start16, posOf[segs[$0].noteIndex]) < (segs[$1].start16, posOf[segs[$1].noteIndex]) })
+        where segs[si].index == 0 {
+            let sg = segs[si], sp = spelled[sg.noteIndex]
+            let key = "\(sg.staff):\(sg.start16 / perBar):\(sp.dia)"
+            let current = accState[key] ?? Notation.keyAlter(step: sp.step, fifths: fifths)
+            if sp.alter != current {
+                accOf[si] = Accidental(alter: sp.alter)
+                accState[key] = sp.alter
+            }
+        }
+
+        // Onset groups (chords) per staff, in time order.
+        struct Onset {
+            var staff: Int
+            var start16: Int
+            var segs: [Int] // sorted by staff position, low to high
+            var dur16: Int
+            var stemUp = true
+            var shift: [CGFloat] = [] // per seg (in staff spaces: +right, -left)
+            var accCol: [Int?] = []
+            var left: CGFloat = 0 // extent left of the notehead
+            var right: CGFloat = 0 // extent right of the notehead
+            var beam: Int? // beam run id
+        }
+        var onsets: [Onset] = []
+        do {
+            var map: [String: Int] = [:]
+            for (si, sg) in segs.enumerated() {
+                let k = "\(sg.staff):\(sg.start16)"
+                if let o = map[k] { onsets[o].segs.append(si); onsets[o].dur16 = min(onsets[o].dur16, sg.duration16) }
+                else { map[k] = onsets.count; onsets.append(Onset(staff: sg.staff, start16: sg.start16, segs: [si], dur16: sg.duration16)) }
+            }
+            for o in onsets.indices { onsets[o].segs.sort { posOf[segs[$0].noteIndex] < posOf[segs[$1].noteIndex] } }
+            onsets.sort { ($0.staff, $0.start16) < ($1.staff, $1.start16) }
+        }
+        func positions(_ o: Onset) -> [Int] { o.segs.map { posOf[segs[$0].noteIndex] } }
+        func stemUpFor(_ ps: [Int]) -> Bool {
+            guard let lo = ps.min(), let hi = ps.max() else { return true }
+            return (hi - 4) < (4 - lo) // the note farthest from the middle line decides
+        }
+
+        // Beam runs: 8ths/16ths within one beat, per staff; one stem direction per run.
+        var beamRuns: [[Int]] = [] // onset indices
+        do {
+            var run: [Int] = []
+            func flush() { if run.count >= 2 { beamRuns.append(run) }; run = [] }
+            for o in onsets.indices {
+                let on = onsets[o]
+                let beammable = on.dur16 <= 3 && on.segs.allSatisfy { segs[$0].duration16 <= 3 }
+                if beammable, let f = run.first, onsets[f].staff == on.staff,
+                   onsets[f].start16 / beat16 == on.start16 / beat16, onsets[f].start16 / perBar == on.start16 / perBar {
+                    run.append(o)
+                } else {
+                    flush()
+                    if beammable { run = [o] }
+                }
+            }
+            flush()
+        }
+        for o in onsets.indices { onsets[o].stemUp = stemUpFor(positions(onsets[o])) }
+        for (r, run) in beamRuns.enumerated() {
+            let all = run.flatMap { positions(onsets[$0]) }
+            let avg = Double(all.reduce(0, +)) / Double(max(1, all.count))
+            for o in run { onsets[o].stemUp = avg < 4; onsets[o].beam = r }
+        }
+
+        // Seconds, accidental columns and horizontal extents per onset.
+        for o in onsets.indices {
+            let ps = positions(onsets[o])
+            var shift = [CGFloat](repeating: 0, count: ps.count)
+            if onsets[o].stemUp {
+                for k in ps.indices.dropFirst() where ps[k] - ps[k - 1] <= 1 && shift[k - 1] == 0 { shift[k] = Self.headShift }
+            } else {
+                for k in ps.indices.reversed().dropFirst() where ps[k + 1] - ps[k] <= 1 && shift[k + 1] == 0 { shift[k] = -Self.headShift }
+            }
+            // Accidentals top to bottom; a new column when within 3 staff spaces of one above.
+            var cols: [[Int]] = []
+            var accCol = [Int?](repeating: nil, count: ps.count)
+            for k in ps.indices.reversed() where accOf[onsets[o].segs[k]] != nil {
+                let c = cols.firstIndex { col in col.allSatisfy { abs($0 - ps[k]) >= 6 } } ?? cols.count
+                if c == cols.count { cols.append([]) }
+                cols[c].append(ps[k])
+                accCol[k] = c
+            }
+            onsets[o].shift = shift
+            onsets[o].accCol = accCol
+            let leftShift = shift.contains { $0 < 0 } ? Self.headShift * s : 0
+            onsets[o].left = leftShift + (cols.isEmpty ? 0 : 0.25 * s + CGFloat(cols.count) * Self.accColumn * s)
+            let rightShift = shift.contains { $0 > 0 } ? Self.headShift * s : 0
+            let dotted = onsets[o].segs.contains { [3, 6, 12].contains(segs[$0].duration16) }
+            let flagged = onsets[o].beam == nil && onsets[o].dur16 <= 3 && onsets[o].stemUp
+            onsets[o].right = rightShift + (dotted ? 0.9 * s : 0) + (flagged ? 0.9 * s : 0)
+        }
+
+        // Horizontal extents per bar onset (both staves share x).
+        var barCols: [[Int: (left: CGFloat, right: CGFloat)]] = Array(repeating: [:], count: barCount)
+        for on in onsets {
+            let b = min(barCount - 1, on.start16 / perBar)
+            let rel = on.start16 - b * perBar
+            let cur = barCols[b][rel] ?? (0, 0)
+            barCols[b][rel] = (max(cur.left, on.left), max(cur.right, on.right))
+        }
+
         // Grand staff: room for the brace left of the system.
         let braceRoom: CGFloat = grand ? 10 : 0
         let contentW = width - style.leftMargin - braceRoom - style.rightMargin
-        // Clef + key + time at the start of every system. This is extra width on the system's
-        // first measure; it used to come out of that measure's note area, squeezing its notes
-        // against the time signature (or left of it with a key signature).
-        let header = 6 + s * 3.2 + CGFloat(abs(score.key.fifths)) * s * 0.95 + s * 2.2
+        // Clef + key + time at the start of every system (outside the first measure's note area).
+        let keyW = CGFloat(abs(fifths)) * Self.keyStep * s + (fifths != 0 ? 0.5 * s : 0)
+        let header = 6 + s * 3.2 + keyW + s * 2.2
 
-        // Measure widths: enough for the onset count and for the closest pair of onsets
-        // (onsets are placed proportionally to time within the bar, like the piano roll).
-        var barOnsets = [Set<Int>](repeating: [], count: barCount)
-        for n in score.notes {
-            let b = min(barCount - 1, n.start16 / sixteenthsPerBar)
-            barOnsets[b].insert(n.start16 - b * sixteenthsPerBar)
-        }
+        // Measure widths: proportional placement in time (like the piano roll), wide enough for
+        // every pair of onsets including their accidentals, seconds, dots and flags.
         let minOnsetSpacing = s * 2.4
-        let maxMeasureW = max(72, min(260, contentW - header))
+        let maxMeasureW = max(72, contentW - header)
+        var leads = [CGFloat](repeating: 0, count: barCount)
         let measureWidths: [CGFloat] = (0..<barCount).map { b in
-            let sorted = barOnsets[b].sorted()
-            let minGap = zip(sorted, sorted.dropFirst()).map { $1 - $0 }.min() ?? sixteenthsPerBar
-            let byGap = 20 + CGFloat(sixteenthsPerBar) / CGFloat(max(1, minGap)) * minOnsetSpacing
-            return min(maxMeasureW, max(72, 30 + CGFloat(onsetsPerBar[b]) * 16, byGap))
+            let cols = barCols[b].sorted { $0.key < $1.key }
+            let lead = cols.first.map { $0.key == 0 ? $0.value.left : 0 } ?? 0
+            leads[b] = lead
+            var usable: CGFloat = 0
+            for (a, c) in zip(cols, cols.dropFirst()) {
+                let need = hh + a.value.right + 0.6 * s + c.value.left + hh
+                usable = max(usable, need * CGFloat(perBar) / CGFloat(c.key - a.key))
+            }
+            if let f = cols.first, f.key > 0 {
+                usable = max(usable, (f.value.left + hh - 6) * CGFloat(perBar) / CGFloat(f.key))
+            }
+            if let l = cols.last {
+                usable = max(usable, (hh + l.value.right + 0.4 * s) * CGFloat(perBar) / CGFloat(perBar - l.key))
+            }
+            let minGap = zip(cols, cols.dropFirst()).map { $1.key - $0.key }.min() ?? perBar
+            let byGap = 20 + CGFloat(perBar) / CGFloat(max(1, minGap)) * minOnsetSpacing
+            return min(maxMeasureW, max(72, 30 + CGFloat(cols.count) * 16, byGap, lead + 8 + usable))
         }
 
-        // Pack measures into systems (each system starts with the header).
+        // Pack measures into systems (each system starts with the header), then justify each
+        // system to the full width.
         var systems: [[Int]] = []
         var cur: [Int] = []
         var curW: CGFloat = header
@@ -203,18 +451,60 @@ private struct Layout {
             cur.append(i); curW += w
         }
         if !cur.isEmpty { systems.append(cur) }
+        /// Note-area offsets per onset (16ths into the bar → x past `contentMinX + 8`): proportional
+        /// to time, but never closer than the onsets' clearance (accidentals, seconds, dots); when a
+        /// full-width bar can't hold that proportionally, the time unit shrinks until it fits.
+        func barOffsets(_ b: Int, usable: CGFloat) -> [Int: CGFloat] {
+            let cols = barCols[b].sorted { $0.key < $1.key }
+            guard !cols.isEmpty else { return [:] }
+            func place(unit: CGFloat) -> (offsets: [Int: CGFloat], end: CGFloat) {
+                var out: [Int: CGFloat] = [:]
+                var prev: (rel: Int, off: CGFloat, right: CGFloat)?
+                for c in cols {
+                    var o = CGFloat(c.key) * unit
+                    if let pv = prev {
+                        o = max(o, pv.off + hh + pv.right + 0.6 * s + c.value.left + hh)
+                    } else if c.key > 0 {
+                        o = max(o, c.value.left + hh - 6)
+                    }
+                    out[c.key] = o
+                    prev = (c.key, o, c.value.right)
+                }
+                let last = cols[cols.count - 1]
+                return (out, (out[last.key] ?? 0) + hh + last.value.right + 0.4 * s)
+            }
+            let full = usable / CGFloat(perBar)
+            let fit = place(unit: full)
+            if fit.end <= usable + 0.01 { return fit.offsets }
+            var lo: CGFloat = 0, hi = full
+            for _ in 0..<30 {
+                let mid = (lo + hi) / 2
+                if place(unit: mid).end <= usable { lo = mid } else { hi = mid }
+            }
+            return place(unit: lo).offsets
+        }
+
+        var justified = measureWidths
+        for sys in systems {
+            let natural = sys.reduce(0) { $0 + measureWidths[$1] }
+            let scale = max(1, (contentW - header) / max(1, natural))
+            for b in sys { justified[b] = measureWidths[b] * scale }
+        }
 
         let systemHeight = CGFloat(stavesPerSystem) * 4 * s + (grand ? style.grandStaffGap : 0)
         var staffLines: [(y: CGFloat, x0: CGFloat, x1: CGFloat, staff: Int, system: Int)] = []
         var barlines: [(x: CGFloat, y0: CGFloat, y1: CGFloat, final: Bool)] = []
         var clefs: [(x: CGFloat, y: CGFloat, glyph: String, size: CGFloat, staff: Int, system: Int)] = []
-        var keySig: [(x: CGFloat, y: CGFloat, glyph: String, staff: Int, system: Int)] = []
+        var keySig: [KeyGlyph] = []
         var timeSig: [(x: CGFloat, y: CGFloat, text: String, staff: Int, system: Int)] = []
         var noteEntries: [NoteEntry] = []
-        var beamGroups: [BeamGroup] = []
         var braces: [(x: CGFloat, y0: CGFloat, y1: CGFloat)] = []
         var systemFrames: [CGRect] = []
+        var systemRight: [CGFloat] = []
         var measures: [Engraver.MeasureFrame] = []
+        var entryOfSeg = [Int](repeating: -1, count: segs.count)
+        var entriesOfOnset = [[Int]](repeating: [], count: onsets.count)
+        let onsetsByBar: [Int: [Int]] = Dictionary(grouping: onsets.indices, by: { min(barCount - 1, onsets[$0].start16 / perBar) })
 
         var y = style.topMargin
         var prevBottom: CGFloat = 0 // bottom extent of the previous system
@@ -225,118 +515,87 @@ private struct Layout {
         } else {
             self.tempoMark = nil
         }
-        let keyFifths = score.key.fifths
-        let preferSharps = keyFifths >= 0
 
         for (sysIdx, sys) in systems.enumerated() {
             let sysTop = y
             let marks = (lines: staffLines.count, bars: barlines.count, clefs: clefs.count, keys: keySig.count,
                          times: timeSig.count, notes: noteEntries.count, braces: braces.count)
-            let sysW = header + sys.reduce(0) { $0 + measureWidths[$1] }
             let x0 = style.leftMargin + braceRoom
-            let x1 = x0 + min(contentW, sysW)
+            let x1 = x0 + header + sys.reduce(0) { $0 + justified[$1] }
+            systemRight.append(x1)
+            func staffTopOf(_ staff: Int) -> CGFloat { sysTop + CGFloat(staff) * (4 * s + style.grandStaffGap) }
 
-            // Staff lines.
             for staff in 0..<stavesPerSystem {
-                let staffTop = sysTop + CGFloat(staff) * (4 * s + style.grandStaffGap)
+                let staffTop = staffTopOf(staff)
                 for l in 0..<5 {
                     staffLines.append((y: staffTop + CGFloat(l) * s, x0: x0, x1: x1, staff: staff, system: sysIdx))
                 }
-            }
-
-            // Clef / key / time at system start (every system).
-            for staff in 0..<stavesPerSystem {
-                let staffTop = sysTop + CGFloat(staff) * (4 * s + style.grandStaffGap)
+                // Clef / key / time at system start (every system).
                 let glyph = staff == 0 ? "\u{1D11E}" : "\u{1D122}" // 𝄞 / 𝄢
                 clefs.append((x: x0 + 6, y: staffTop - s * 0.6, glyph: glyph, size: s * 4.6, staff: staff, system: sysIdx))
-                var kx = x0 + 6 + s * 3.2
-                for (i, acc) in keySignatureGlyphs(fifths: keyFifths, staff: staff).enumerated() {
-                    keySig.append((x: kx + CGFloat(i) * s * 0.95, y: acc.y(staffTop: staffTop, s: s),
-                                   glyph: acc.glyph, staff: staff, system: sysIdx))
+                let kx = x0 + 6 + s * 3.2
+                for (i, (acc, p)) in Notation.keySignature(fifths: fifths, staff: staff).enumerated() {
+                    keySig.append(KeyGlyph(x: kx + (CGFloat(i) + 0.5) * Self.keyStep * s,
+                                           y: staffTop + 4 * s - CGFloat(p) * s / 2,
+                                           glyph: acc, staff: staff, system: sysIdx, position: p))
                 }
-                kx += CGFloat(abs(keyFifths)) * s * 0.95
-                let beats = "\(score.meter.beatsPerBar)", unit = "\(score.meter.beatUnit)"
-                timeSig.append((x: kx + 4, y: staffTop + s * 0.4, text: beats, staff: staff, system: sysIdx))
-                timeSig.append((x: kx + 4, y: staffTop + s * 2.4, text: unit, staff: staff, system: sysIdx))
+                let tx = kx + keyW + 4
+                timeSig.append((x: tx, y: staffTop + s * 0.4, text: "\(score.meter.beatsPerBar)", staff: staff, system: sysIdx))
+                timeSig.append((x: tx, y: staffTop + s * 2.4, text: "\(score.meter.beatUnit)", staff: staff, system: sysIdx))
             }
 
-            // Notes per measure.
-            var mx = x0
-            // Reserve room for clef/key/time on every system.
-            let contentX0 = x0 + header
+            var mx = x0 + header
             for (mi, bar) in sys.enumerated() {
-                let mw = measureWidths[bar]
-                let barStart16 = bar * sixteenthsPerBar
-                let barEnd16 = barStart16 + sixteenthsPerBar
-                let mLeft = (mi == 0) ? contentX0 : mx
-                let mRight = mLeft + mw
-                measures.append(Engraver.MeasureFrame(index: bar, system: sysIdx, contentMinX: mLeft, maxX: mRight))
-                let usable = mRight - mLeft - 8
-
-                // Barline at measure start (except first of system) and end.
-                if mi > 0 {
-                    barlines.append((x: mx, y0: sysTop, y1: sysTop + systemHeight, final: false))
-                }
+                let mLeft = mx
+                let mRight = mLeft + justified[bar]
+                let contentMinX = mLeft + leads[bar]
+                measures.append(Engraver.MeasureFrame(index: bar, system: sysIdx, contentMinX: contentMinX, maxX: mRight))
+                let usable = mRight - contentMinX - 8
+                let offsets = barOffsets(bar, usable: usable)
+                if mi > 0 { barlines.append((x: mLeft, y0: sysTop, y1: sysTop + systemHeight, final: false)) }
                 let isFinal = (sysIdx == systems.count - 1) && (mi == sys.count - 1)
                 barlines.append((x: mRight, y0: sysTop, y1: sysTop + systemHeight, final: isFinal))
 
-                // Notes in this bar, per staff.
-                for staff in 0..<stavesPerSystem {
-                    let staffTop = sysTop + CGFloat(staff) * (4 * s + style.grandStaffGap)
-                    let barNotes = score.notes.enumerated().filter { i, n in
-                        staffOf[i] == staff && n.start16 >= barStart16 && n.start16 < barEnd16
-                    }
-                    // Chord grouping by start16.
-                    var byOnset: [Int: [Int]] = [:]
-                    for (idx, n) in barNotes { byOnset[n.start16, default: []].append(idx) }
-                    // Stem direction per onset from chord extent.
-                    for onset in byOnset.keys.sorted() {
-                        let idxs = byOnset[onset]!.sorted { score.notes[$0].midi < score.notes[$1].midi }
-                        let midis = idxs.map { score.notes[$0].midi }
-                        let staffMid = staff == 0 ? 71 : 50
-                        let stemUp = (midis.reduce(0, +) / max(1, midis.count)) < staffMid
-                        // Seconds: shift the upper of an adjacent pair.
-                        var shifts = [CGFloat](repeating: 0, count: idxs.count)
-                        for k in 1..<idxs.count {
-                            if midis[k] - midis[k - 1] == 1 {
-                                shifts[k] = stemUp ? s * 1.15 : -s * 1.15
-                                // alternate for longer clusters
-                                if k >= 2, midis[k - 1] - midis[k - 2] == 1 { shifts[k] = 0 }
-                            }
-                        }
-                        let xPos = mLeft + 8 + CGFloat(onset - barStart16) / CGFloat(sixteenthsPerBar) * usable
-                        for (k, idx) in idxs.enumerated() {
-                            let n = score.notes[idx]
-                            let (hy, ledgers) = headY(midi: n.midi, staff: staff, staffTop: staffTop, s: s)
-                            let filled: Bool = {
-                                let q = n.duration16
-                                return q < 8 // quarter and shorter: filled
-                            }()
-                            let dots = n.duration16 == 12 || n.duration16 == 6 || n.duration16 == 3 ? 1 : 0
-                            let stemX = xPos + shifts[k] + (stemUp ? s * 0.55 : -s * 0.55)
-                            let stemLen = 3.5 * s
-                            let entry = NoteEntry(
-                                noteIndex: idx,
-                                head: CGPoint(x: xPos + shifts[k], y: hy),
-                                frame: CGRect(x: xPos + shifts[k] - s * 0.8, y: hy - s * 0.7,
-                                              width: s * 1.6 + abs(shifts[k]), height: s * 1.4),
-                                staff: staff,
-                                accidental: nil, // filled below from spelling
-                                stemUp: stemUp,
-                                stemX: stemX,
-                                stemEndY: hy + (stemUp ? -stemLen : stemLen),
-                                ledgerYs: ledgers,
-                                chordShift: shifts[k],
-                                dots: dots,
-                                filled: filled,
-                                stemmed: n.duration16 < 16,
-                                beamID: nil,
-                                flagged: false,
-                                tieStart: false, tieStop: false,
-                                tieStartX: xPos + shifts[k] + s * 0.75
-                            )
-                            noteEntries.append(entry)
-                        }
+                for o in onsetsByBar[bar] ?? [] {
+                    let on = onsets[o]
+                    let staffTop = staffTopOf(on.staff)
+                    let middleY = staffTop + 2 * s
+                    let rel = on.start16 - bar * perBar
+                    let xPos = contentMinX + 8 + (offsets[rel] ?? CGFloat(rel) / CGFloat(perBar) * usable)
+                    let leftShift = on.shift.contains { $0 < 0 } ? Self.headShift * s : 0
+                    let rightShift = on.shift.contains { $0 > 0 } ? Self.headShift * s : 0
+                    let stemX = xPos + (on.stemUp ? hh - 0.05 * s : -(hh - 0.05 * s))
+                    let ys = on.segs.map { staffTop + 4 * s - CGFloat(posOf[segs[$0].noteIndex]) * s / 2 }
+                    let stemEnd = on.stemUp
+                        ? min((ys.min() ?? middleY) - 3.5 * s, middleY)
+                        : max((ys.max() ?? middleY) + 3.5 * s, middleY)
+                    for (k, si) in on.segs.enumerated() {
+                        let sg = segs[si]
+                        let p = posOf[sg.noteIndex]
+                        let hx = xPos + on.shift[k] * s
+                        let hy = ys[k]
+                        var ledgers: [CGFloat] = []
+                        if p >= 10 { for d in stride(from: 10, through: p, by: 2) { ledgers.append(staffTop + 4 * s - CGFloat(d) * s / 2) } }
+                        if p <= -2 { for d in stride(from: -2, through: p, by: -2) { ledgers.append(staffTop + 4 * s - CGFloat(d) * s / 2) } }
+                        let accX = xPos - hh - leftShift - 0.25 * s - (CGFloat(on.accCol[k] ?? 0) + 0.5) * Self.accColumn * s
+                        let entry = NoteEntry(
+                            noteIndex: sg.noteIndex,
+                            head: CGPoint(x: hx, y: hy),
+                            frame: CGRect(x: hx - s * 0.8, y: hy - s * 0.7, width: s * 1.6, height: s * 1.4),
+                            staff: on.staff, pos: p,
+                            accidental: accOf[si], accidentalX: accX,
+                            stemUp: on.stemUp, stemX: stemX, stemEndY: stemEnd,
+                            ledgerYs: ledgers,
+                            dots: [3, 6, 12].contains(sg.duration16) ? 1 : 0,
+                            dotX: xPos + hh + rightShift + 0.45 * s,
+                            filled: sg.duration16 < 8,
+                            stemmed: sg.duration16 < 16,
+                            beamID: nil,
+                            flags: on.beam == nil ? (sg.duration16 == 1 ? 2 : (sg.duration16 <= 3 ? 1 : 0)) : 0,
+                            segment: sg.index, lastSegment: sg.last, system: sysIdx)
+                        entryOfSeg[si] = noteEntries.count
+                        entriesOfOnset[o].append(noteEntries.count)
+                        noteEntries.append(entry)
                     }
                 }
                 mx = mRight
@@ -347,13 +606,17 @@ private struct Layout {
                 braces.append((x: x0 - braceRoom, y0: sysTop, y1: sysTop + systemHeight))
             }
 
+            // Beam runs in this system: flat beams at the extreme stem end.
+            // (Runs never cross bars, so never systems.)
+            // Done below after all systems; extents here use the unbeamed stems plus margin.
+
             // Vertical extent: staves + clef overhang, plus heads, ledger lines, stems and accidentals.
             var top = sysTop - s * 2
             var bottom = sysTop + systemHeight + s * 1.5
             for e in noteEntries[marks.notes...] {
-                top = min(top, e.head.y - s * 1.3)
-                bottom = max(bottom, e.head.y + s * 1.3)
-                if e.stemmed { top = min(top, e.stemEndY - s); bottom = max(bottom, e.stemEndY + s) }
+                top = min(top, e.head.y - s * 1.6)
+                bottom = max(bottom, e.head.y + s * 1.6)
+                if e.stemmed { top = min(top, e.stemEndY - s * 1.5); bottom = max(bottom, e.stemEndY + s * 1.5) }
                 for ly in e.ledgerYs { top = min(top, ly - s * 0.5); bottom = max(bottom, ly + s * 0.5) }
             }
             // Shift this system down if its content would reach into the previous system.
@@ -378,13 +641,49 @@ private struct Layout {
             y = sysTop + dy + systemHeight + style.systemGap
         }
 
-        // Accidentals from key spelling (per measure reset).
-        accidentalPass(score: score, entries: &noteEntries, preferSharps: preferSharps,
-                       sixteenthsPerBar: sixteenthsPerBar)
+        // Beams: per run, one level-1 beam; level-2 beams over consecutive 16ths. Stems of the run
+        // end at the extreme (flat beam).
+        var beamGroups: [BeamGroup] = []
+        for run in beamRuns {
+            let idxs = run.flatMap { entriesOfOnset[$0] }
+            guard let first = idxs.first else { continue }
+            let up = noteEntries[first].stemUp
+            let ends = idxs.map { noteEntries[$0].stemEndY }
+            let extreme = (up ? ends.min() : ends.max()) ?? noteEntries[first].stemEndY
+            for i in idxs { noteEntries[i].stemEndY = extreme }
+            let id = beamGroups.count
+            beamGroups.append(BeamGroup(staff: noteEntries[first].staff, stemUp: up, indices: idxs, level: 1))
+            for i in idxs { noteEntries[i].beamID = id }
+            var sub: [Int] = []
+            func flushSub() {
+                if sub.count >= 2 {
+                    beamGroups.append(BeamGroup(staff: noteEntries[first].staff, stemUp: up,
+                                                indices: sub.flatMap { entriesOfOnset[$0] }, level: 2))
+                }
+                sub = []
+            }
+            for o in run { if onsets[o].dur16 == 1 { sub.append(o) } else { flushSub() } }
+            flushSub()
+        }
 
-        // Beams: group beammable onsets per (system-less) beat within each measure+staff.
-        beamPass(score: score, entries: &noteEntries, beamGroups: &beamGroups,
-                 sixteenthsPerBar: sixteenthsPerBar, beatUnit: score.meter.beatUnit)
+        // Ties: from each segment to the next one of the same note; across a system break, to the
+        // system's end and again into the next system.
+        var ties: [Tie] = []
+        for (si, sg) in segs.enumerated() where !sg.last {
+            let a = entryOfSeg[si], b = si + 1 < segs.count ? entryOfSeg[si + 1] : -1
+            guard a >= 0, b >= 0 else { continue }
+            let ea = noteEntries[a], eb = noteEntries[b]
+            let below = !ea.stemUp
+            let off = below ? 0.75 * s : -0.75 * s
+            if ea.system == eb.system {
+                let x0 = ea.head.x + hh + 1.5
+                ties.append(Tie(x0: x0, x1: max(x0 + 6, eb.head.x - hh - 1.5), y: ea.head.y + off, below: below))
+            } else {
+                let x0 = ea.head.x + hh + 1.5
+                ties.append(Tie(x0: x0, x1: max(x0 + 6, systemRight[ea.system] - 3), y: ea.head.y + off, below: below))
+                ties.append(Tie(x0: eb.head.x - hh - 1.6 * s, x1: eb.head.x - hh - 1.5, y: eb.head.y + off, below: below))
+            }
+        }
 
         self.size = CGSize(width: width, height: max(y - style.systemGap, prevBottom) + 20)
         self.noteEntries = noteEntries
@@ -395,160 +694,9 @@ private struct Layout {
         self.keySig = keySig
         self.timeSig = timeSig
         self.braces = braces
+        self.ties = ties
         self.systemFrames = systemFrames
         self.measures = measures
-    }
-}
-
-// MARK: - Layout helpers
-
-private func headY(midi: Int, staff: Int, staffTop: CGFloat, s: CGFloat) -> (CGFloat, [CGFloat]) {
-    // Diatonic index; treble bottom line E4 (64), bass bottom line G2 (43).
-    let pcDia = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]
-    func dia(_ m: Int) -> Int { (m / 12) * 7 + pcDia[((m % 12) + 12) % 12] }
-    let ref = staff == 0 ? dia(64) : dia(43)
-    let steps = dia(midi) - ref
-    let y = staffTop + 4 * s - CGFloat(steps) * s / 2
-    var ledgers: [CGFloat] = []
-    if steps > 8 {
-        var d = 10
-        while d <= steps { ledgers.append(staffTop + 4 * s - CGFloat(d) * s / 2); d += 2 }
-    } else if steps < 0 {
-        var d = -2
-        while d >= steps { ledgers.append(staffTop + 4 * s - CGFloat(d) * s / 2); d -= 2 }
-    }
-    return (y, ledgers)
-}
-
-private struct KeyAccidental { var glyph: String; var diaStep: Int
-    func y(staffTop: CGFloat, s: CGFloat) -> CGFloat {
-        staffTop + 4 * s - CGFloat(diaStep) * s / 2
-    }
-}
-
-private func keySignatureGlyphs(fifths: Int, staff: Int) -> [KeyAccidental] {
-    // Standard key-signature accidental positions as diatonic steps from the
-    // bottom staff line (E4 treble, G2 bass).
-    let trebleSharps = [1, 4, 0, 3, -1, 2, 5] // F4 C5 G4 D5 A3 E5 B4 (approx standard)
-    let trebleFlats = [3, 0, 4, 1, 5, 2, -2] // Bb4 Eb5 Ab4 Db5 Gb5 Cb5 Fb4 (approx standard)
-    let bassSharps = [3, 0, 4, 1, 5, 2, -1]
-    let bassFlats = [1, 4, 0, 3, -1, 2, 5]
-    var out: [KeyAccidental] = []
-    if fifths > 0 {
-        let steps = staff == 0 ? trebleSharps : bassSharps
-        for i in 0..<min(fifths, 7) { out.append(KeyAccidental(glyph: "♯", diaStep: steps[i])) }
-    } else if fifths < 0 {
-        let steps = staff == 0 ? trebleFlats : bassFlats
-        for i in 0..<min(-fifths, 7) { out.append(KeyAccidental(glyph: "♭", diaStep: steps[i])) }
-    }
-    return out
-}
-
-/// Fills accidental glyphs per measure from spelling vs key signature.
-private func accidentalPass(score: QuantizedScore, entries: inout [NoteEntry],
-                            preferSharps: Bool, sixteenthsPerBar: Int) {
-    let fifths = score.key.fifths
-    func keyAlter(step: String) -> Int {
-        let sharps = ["F", "C", "G", "D", "A", "E", "B"]
-        let flats = ["B", "E", "A", "D", "G", "C", "F"]
-        if fifths > 0, sharps.prefix(fifths).contains(step) { return 1 }
-        if fifths < 0, flats.prefix(-fifths).contains(step) { return -1 }
-        return 0
-    }
-    let sharpSteps = ["C", "C", "D", "D", "E", "F", "F", "G", "G", "A", "A", "B"]
-    let sharpAlters = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
-    let flatSteps = ["C", "D", "D", "E", "E", "F", "G", "G", "A", "A", "B", "B"]
-    let flatAlters = [0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0]
-    // Group entry indices by measure.
-    var byMeasure: [Int: [Int]] = [:]
-    for (i, e) in entries.enumerated() {
-        let n = score.notes[e.noteIndex]
-        byMeasure[n.start16 / sixteenthsPerBar, default: []].append(i)
-    }
-    for m in byMeasure.keys.sorted() {
-        var state: [String: Int] = [:]
-        for i in byMeasure[m]!.sorted(by: { entries[$0].head.x < entries[$1].head.x }) {
-            let midi = score.notes[entries[i].noteIndex].midi
-            let pc = ((midi % 12) + 12) % 12
-            let (step, alter): (String, Int) = preferSharps
-                ? (sharpSteps[pc], sharpAlters[pc]) : (flatSteps[pc], flatAlters[pc])
-            let current = state[step, default: keyAlter(step: step)]
-            if alter != current {
-                entries[i].accidental = alter == 1 ? "♯" : (alter == -1 ? "♭" : "♮")
-                state[step] = alter
-            }
-        }
-    }
-}
-
-/// Assigns beam groups (per beat, per staff) and lone-16th flags.
-private func beamPass(score: QuantizedScore, entries: inout [NoteEntry],
-                      beamGroups: inout [BeamGroup], sixteenthsPerBar: Int, beatUnit: Int) {
-    let beat16 = 16 / beatUnit
-    // Onset groups: entries sharing (staff, start16), in x order.
-    var onsets: [(staff: Int, start16: Int, indices: [Int])] = []
-    var map: [String: Int] = [:]
-    for (i, e) in entries.enumerated() {
-        let n = score.notes[e.noteIndex]
-        let key = "\(e.staff):\(n.start16)"
-        if let gi = map[key] { onsets[gi].indices.append(i) }
-        else { map[key] = onsets.count; onsets.append((e.staff, n.start16, [i])) }
-    }
-    onsets.sort { ($0.staff, $0.start16) < ($1.staff, $1.start16) }
-
-    var group: [(staff: Int, start16: Int, indices: [Int])] = []
-    func flush() {
-        guard group.count >= 2 else {
-            // Lone 16th: flagged.
-            if group.count == 1 {
-                let g = group[0]
-                let n = score.notes[entries[g.indices[0]].noteIndex]
-                if n.duration16 == 1 {
-                    for idx in g.indices { entries[idx].flagged = true }
-                }
-            }
-            group = []
-            return
-        }
-        // One beam group per beam level needed.
-        let maxLevel = group.map { score.notes[entries[$0.indices[0]].noteIndex].duration16 == 1 ? 2 : 1 }.max() ?? 1
-        for level in 1...maxLevel {
-            var run: [Int] = []
-            func flushRun() {
-                guard run.count >= 2 else { run = []; return }
-                let id = beamGroups.count
-                beamGroups.append(BeamGroup(staff: group[run[0]].staff,
-                                            stemUp: entries[group[run[0]].indices[0]].stemUp,
-                                            indices: run.flatMap { group[$0].indices },
-                                            level: level))
-                for r in run { for idx in group[r].indices { entries[idx].beamID = id } }
-                run = []
-            }
-            for (gi, g) in group.enumerated() {
-                let lvl = score.notes[entries[g.indices[0]].noteIndex].duration16 == 1 ? 2 : 1
-                if lvl >= level { run.append(gi) } else { flushRun() }
-            }
-            flushRun()
-        }
-        group = []
-    }
-    for o in onsets {
-        let n = score.notes[entries[o.indices[0]].noteIndex]
-        let beammable = n.duration16 <= 2
-        let beat = o.start16 / beat16
-        if beammable, !group.isEmpty, group[0].staff == o.staff, (group[0].start16 / beat16) == beat {
-            group.append(o)
-        } else {
-            flush()
-            if beammable { group = [o] }
-        }
-    }
-    flush()
-    // Normalize beam stems: all stems in a group end at the extreme.
-    for b in beamGroups {
-        let ys = b.indices.map { entries[$0].stemEndY }
-        guard let extreme = b.stemUp ? ys.min() : ys.max() else { continue }
-        for idx in b.indices { entries[idx].stemEndY = extreme }
     }
 }
 
@@ -558,6 +706,7 @@ private struct Renderer {
     var ctx: CGContext
     var flipped: Bool
     var layout: Layout
+    let s: CGFloat = 9
 
     mutating func render() {
         ctx.setStrokeColor(CGColor(gray: 0, alpha: 1))
@@ -581,7 +730,7 @@ private struct Renderer {
             drawText(c.glyph, at: CGPoint(x: c.x, y: c.y), size: c.size)
         }
         for k in layout.keySig {
-            drawText(k.glyph, at: CGPoint(x: k.x, y: k.y - 7), size: 20)
+            accidental(k.glyph, cx: k.x, cy: k.y)
         }
         for t in layout.timeSig {
             drawText(t.text, at: CGPoint(x: t.x, y: t.y - 8), size: 19, bold: true)
@@ -595,17 +744,18 @@ private struct Renderer {
         for b in layout.beamGroups {
             drawBeam(b)
         }
+        for t in layout.ties {
+            tie(t)
+        }
     }
 
     mutating func drawNote(_ e: NoteEntry) {
-        let s: CGFloat = 9
         // Ledger lines.
         for ly in e.ledgerYs {
-            line(x0: e.head.x - s * 0.75, y0: ly, x1: e.head.x + s * 0.75, y1: ly, width: 1)
+            line(x0: e.head.x - s * 0.95, y0: ly, x1: e.head.x + s * 0.95, y1: ly, width: 1)
         }
-        // Accidental.
         if let acc = e.accidental {
-            drawText(acc, at: CGPoint(x: e.head.x - s * 1.5 - 8, y: e.head.y - 8), size: 20)
+            accidental(acc, cx: e.accidentalX, cy: e.head.y)
         }
         // Head: rotated ellipse.
         ctx.saveGState()
@@ -620,41 +770,34 @@ private struct Renderer {
             ctx.setLineWidth(1)
         }
         ctx.restoreGState()
-        // Stem (whole notes have none).
+        // Stem (whole notes have none). Chord notes share one stem x.
         if e.stemmed {
-            line(x0: e.stemX, y0: e.head.y + (e.stemUp ? -2 : 2),
+            line(x0: e.stemX, y0: e.head.y + (e.stemUp ? -1.5 : 1.5),
                  x1: e.stemX, y1: e.stemEndY, width: 1.2)
         }
-        // Flag for unbeamed 8ths/16ths.
-        if e.flagged {
-            ctx.saveGState()
-            ctx.setLineWidth(1.4)
-            let dir: CGFloat = e.stemUp ? -1 : 1
-            ctx.move(to: CGPoint(x: e.stemX, y: e.stemEndY))
-            ctx.addCurve(to: CGPoint(x: e.stemX + 9, y: e.stemEndY + dir * 14),
-                         control1: CGPoint(x: e.stemX + 8, y: e.stemEndY + dir * 2),
-                         control2: CGPoint(x: e.stemX + 10, y: e.stemEndY + dir * 8))
-            ctx.strokePath()
-            ctx.restoreGState()
+        // Flags curl from the stem end back toward the notehead, right of the stem.
+        if e.flags > 0 {
+            let dir: CGFloat = e.stemUp ? 1 : -1
+            for f in 0..<e.flags {
+                let y0 = e.stemEndY + dir * CGFloat(f) * s * 0.8
+                ctx.saveGState()
+                ctx.move(to: CGPoint(x: e.stemX, y: y0))
+                ctx.addCurve(to: CGPoint(x: e.stemX + s * 0.95, y: y0 + dir * s * 2.4),
+                             control1: CGPoint(x: e.stemX + s * 0.15, y: y0 + dir * s * 0.9),
+                             control2: CGPoint(x: e.stemX + s * 1.25, y: y0 + dir * s * 1.3))
+                ctx.addCurve(to: CGPoint(x: e.stemX, y: y0 + dir * s * 0.75),
+                             control1: CGPoint(x: e.stemX + s * 0.9, y: y0 + dir * s * 1.6),
+                             control2: CGPoint(x: e.stemX + s * 0.2, y: y0 + dir * s * 1.2))
+                ctx.closePath()
+                ctx.fillPath()
+                ctx.restoreGState()
+            }
         }
-        // Augmentation dot.
+        // Augmentation dots sit in a space (moved up off a line).
         for d in 0..<e.dots {
-            let dx = e.head.x + s * 0.95 + CGFloat(d) * 7
-            // Dots sit in the space: nudge off a line.
-            let dy = e.head.y + (abs(e.head.y.truncatingRemainder(dividingBy: s)) < 1 ? s * 0.25 : 0)
-            ctx.fillEllipse(in: CGRect(x: dx, y: dy - 1.6, width: 3.2, height: 3.2))
-        }
-        // Tie arc.
-        if e.tieStart {
-            ctx.saveGState()
-            ctx.setLineWidth(1.1)
-            let dir: CGFloat = e.stemUp ? 1 : -1 // ties go opposite the stem
-            let y0 = e.head.y + dir * s * 0.55
-            ctx.move(to: CGPoint(x: e.tieStartX, y: y0))
-            ctx.addQuadCurve(to: CGPoint(x: e.tieStartX + 26, y: y0),
-                             control: CGPoint(x: e.tieStartX + 13, y: y0 + dir * 7))
-            ctx.strokePath()
-            ctx.restoreGState()
+            let dx = e.dotX + CGFloat(d) * s * 0.6
+            let dy = e.head.y - (e.pos % 2 == 0 ? s * 0.5 : 0)
+            ctx.fillEllipse(in: CGRect(x: dx - 1.6, y: dy - 1.6, width: 3.2, height: 3.2))
         }
     }
 
@@ -666,17 +809,70 @@ private struct Renderer {
         let y1 = layout.noteEntries[last].stemEndY
         // Beam thickness 4, second beam offset toward noteheads.
         let dir: CGFloat = b.stemUp ? 1 : -1
-        for l in 0..<b.level {
-            let yo = CGFloat(l) * 7 * dir
+        let yo = CGFloat(b.level - 1) * 7 * dir
+        let t0: CGFloat = b.stemUp ? 0 : -4, t1: CGFloat = b.stemUp ? 4 : 0
+        ctx.saveGState()
+        ctx.move(to: CGPoint(x: x0 - 0.6, y: y0 + yo + t0))
+        ctx.addLine(to: CGPoint(x: x1 + 0.6, y: y1 + yo + t0))
+        ctx.addLine(to: CGPoint(x: x1 + 0.6, y: y1 + yo + t1))
+        ctx.addLine(to: CGPoint(x: x0 - 0.6, y: y0 + yo + t1))
+        ctx.closePath()
+        ctx.fillPath()
+        ctx.restoreGState()
+    }
+
+    /// Tie: a filled crescent between two noteheads, curving away from the stems.
+    mutating func tie(_ t: Tie) {
+        let dir: CGFloat = t.below ? 1 : -1
+        let len = t.x1 - t.x0
+        let h = min(s * 0.9, 2 + len * 0.12)
+        let mid = (t.x0 + t.x1) / 2
+        ctx.saveGState()
+        ctx.move(to: CGPoint(x: t.x0, y: t.y))
+        ctx.addQuadCurve(to: CGPoint(x: t.x1, y: t.y), control: CGPoint(x: mid, y: t.y + dir * h * 2))
+        ctx.addQuadCurve(to: CGPoint(x: t.x0, y: t.y), control: CGPoint(x: mid, y: t.y + dir * (h * 2 - 2.4)))
+        ctx.closePath()
+        ctx.fillPath()
+        ctx.restoreGState()
+    }
+
+    /// Vector accidental centered on (cx, cy) — exact staff placement, independent of fonts.
+    mutating func accidental(_ a: Accidental, cx: CGFloat, cy: CGFloat) {
+        switch a {
+        case .sharp:
+            line(x0: cx - 0.22 * s, y0: cy - 1.25 * s, x1: cx - 0.22 * s, y1: cy + 1.4 * s, width: 1)
+            line(x0: cx + 0.22 * s, y0: cy - 1.4 * s, x1: cx + 0.22 * s, y1: cy + 1.25 * s, width: 1)
+            for yb in [cy - 0.45 * s, cy + 0.45 * s] { slab(x0: cx - 0.5 * s, x1: cx + 0.5 * s, y: yb, rise: 0.25 * s, thick: 0.28 * s) }
+        case .flat:
+            line(x0: cx - 0.3 * s, y0: cy - 1.9 * s, x1: cx - 0.3 * s, y1: cy + 0.55 * s, width: 1.1)
             ctx.saveGState()
-            ctx.move(to: CGPoint(x: x0, y: y0 + yo - 2))
-            ctx.addLine(to: CGPoint(x: x1, y: y1 + yo - 2))
-            ctx.addLine(to: CGPoint(x: x1, y: y1 + yo + 2))
-            ctx.addLine(to: CGPoint(x: x0, y: y0 + yo + 2))
+            ctx.move(to: CGPoint(x: cx - 0.3 * s, y: cy + 0.55 * s))
+            ctx.addCurve(to: CGPoint(x: cx - 0.3 * s, y: cy - 0.25 * s),
+                         control1: CGPoint(x: cx + 0.85 * s, y: cy - 0.15 * s),
+                         control2: CGPoint(x: cx + 0.45 * s, y: cy - 0.95 * s))
+            ctx.addCurve(to: CGPoint(x: cx - 0.3 * s, y: cy + 0.3 * s),
+                         control1: CGPoint(x: cx + 0.2 * s, y: cy - 0.55 * s),
+                         control2: CGPoint(x: cx + 0.45 * s, y: cy - 0.05 * s))
             ctx.closePath()
             ctx.fillPath()
             ctx.restoreGState()
+        case .natural:
+            line(x0: cx - 0.25 * s, y0: cy - 1.3 * s, x1: cx - 0.25 * s, y1: cy + 0.6 * s, width: 1)
+            line(x0: cx + 0.25 * s, y0: cy - 0.6 * s, x1: cx + 0.25 * s, y1: cy + 1.3 * s, width: 1)
+            for yb in [cy - 0.4 * s, cy + 0.4 * s] { slab(x0: cx - 0.25 * s, x1: cx + 0.25 * s, y: yb, rise: 0.15 * s, thick: 0.26 * s) }
         }
+    }
+
+    /// Thick slanted bar (sharp/natural crossbars), rising to the right.
+    mutating func slab(x0: CGFloat, x1: CGFloat, y: CGFloat, rise: CGFloat, thick: CGFloat) {
+        ctx.saveGState()
+        ctx.move(to: CGPoint(x: x0, y: y + rise / 2 - thick / 2))
+        ctx.addLine(to: CGPoint(x: x1, y: y - rise / 2 - thick / 2))
+        ctx.addLine(to: CGPoint(x: x1, y: y - rise / 2 + thick / 2))
+        ctx.addLine(to: CGPoint(x: x0, y: y + rise / 2 + thick / 2))
+        ctx.closePath()
+        ctx.fillPath()
+        ctx.restoreGState()
     }
 
     /// A curly brace spanning y0...y1 with its point at the left (x).

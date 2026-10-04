@@ -20,8 +20,9 @@ struct SheetDetailView: View {
     @ObservedObject var library: TakeLibrary
     @ObservedObject var proStore: ProStore
     /// Starts a new recording with the library's listening flow; the saved take then opens as
-    /// Library > new take. nil hides the mic button (e.g. a take held by the free save limit).
-    var onRecord: (() -> Void)? = nil
+    /// Library > new take. Required: the mic button is always shown (also on a take held by the
+    /// free save limit, where it records again in place).
+    let onRecord: () -> Void
 
     @State private var tab: Tab = SheetDetailView.defaultTab
     @State private var showExport = false
@@ -78,7 +79,7 @@ struct SheetDetailView: View {
 
             Spacer(minLength: 8)
 
-            HStack(spacing: 32) {
+            HStack(spacing: 28) {
                 Button(action: { library.togglePlay(current, score: displayScore) }) {
                     Image(systemName: library.playingTakeID == take.id && library.isPlaying
                           ? "pause.circle.fill" : "play.circle.fill")
@@ -95,15 +96,14 @@ struct SheetDetailView: View {
                 .accessibilityLabel("Export")
                 .accessibilityHint("Export PDF, MP3, MIDI, MusicXML or a photo of the page")
 
-                if let onRecord {
-                    Button(action: { library.stopPlayback(); onRecord() }) {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(Ink.ink)
-                    }
-                    .accessibilityLabel("Record again")
-                    .accessibilityHint("Starts a new recording and opens it as a new take")
+                Button(action: { library.stopPlayback(); onRecord() }) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Ink.ink)
                 }
+                .accessibilityLabel("Record again")
+                .accessibilityHint("Starts a new recording and opens it as a new take")
+                .accessibilityIdentifier("take.recordAgain")
 
                 Button(action: savePhoto) {
                     Image(systemName: "photo")

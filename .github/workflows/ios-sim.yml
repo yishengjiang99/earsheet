@@ -78,6 +78,8 @@ jobs:
         env:
           # xcodebuild strips TEST_RUNNER_ and forwards to the simulator test process.
           TEST_RUNNER_OMR_MODELS_DIR: ${{ github.workspace }}/models
+          # RenderPreviewTests writes engraved fixture PNGs here (uploaded as render-previews).
+          TEST_RUNNER_RENDER_PREVIEWS_DIR: ${{ runner.temp }}/render-previews
         run: |
           set -o pipefail
           xcodebuild test \
@@ -91,6 +93,7 @@ jobs:
             -only-testing:EarSheetTests/TelemetryTests \
             -only-testing:EarSheetTests/PushPermissionTests \
             -only-testing:EarSheetTests/SheetAnalysisTests \
+            -only-testing:EarSheetTests/RenderPreviewTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
@@ -129,6 +132,15 @@ jobs:
         run: |
           APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*Debug-iphonesimulator/EarSheet.app' -maxdepth 6 | head -1)
           if [ -n "$APP" ]; then du -sh "$APP" "$APP/models" "$APP/EarSheet" 2>/dev/null; ls -l "$APP/models" 2>/dev/null; fi
+
+      - name: Upload render previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-previews
+          path: ${{ runner.temp }}/render-previews
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload xcresult
         if: failure()
