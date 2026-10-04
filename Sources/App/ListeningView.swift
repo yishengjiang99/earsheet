@@ -192,7 +192,7 @@ final class ListeningSession: ObservableObject {
     /// PCM captured so far: the final take audio after stop(), live audio while listening.
     var debugExportSamples: [Float] {
         if !finalSamples.isEmpty { return finalSamples }
-        return recorder.currentSamples()
+        return recorder.currentSamples
     }
 
     /// Transcribed notes so far: the final array after stop(), live notes while listening.

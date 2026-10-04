@@ -22,10 +22,10 @@ final class WavWriterTests: XCTestCase {
         XCTAssertEqual(u32LE(data, at: 24), 22050, "sample rate")
         XCTAssertEqual(u32LE(data, at: 40), 10, "data chunk size")
         XCTAssertEqual(i16LE(data, at: 44), 0)
-        XCTAssertEqual(i16LE(data, at: 48), 32767)
+        XCTAssertEqual(i16LE(data, at: 50), 32767)
         XCTAssertEqual(i16LE(data, at: 52), -32767)
         XCTAssertEqual(Double(i16LE(data, at: 46)) / 32767, 0.5, accuracy: 1.0 / 32767)
-        XCTAssertEqual(Double(i16LE(data, at: 50)) / 32767, -0.5, accuracy: 1.0 / 32767)
+        XCTAssertEqual(Double(i16LE(data, at: 48)) / 32767, -0.5, accuracy: 1.0 / 32767)
     }
 
     func testClampsOutOfRange() {
