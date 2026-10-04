@@ -1,1 +1,1 @@
-Audio to Sheet Music & MIDI
+Live Audio to Sheet Music
