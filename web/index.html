@@ -40,8 +40,32 @@
       <button id="sample-btn" disabled>Try a sample (C major)</button>
       <span id="live-badge" class="live-badge" hidden>● LIVE</span> <span id="rec-time" class="muted"></span>
     </div>
+    <div id="mic-notice" class="notice small" hidden></div>
     <div id="audio-info" class="muted small"></div>
     <audio id="audio-el" controls hidden></audio>
+    <details id="mic-settings">
+      <summary>Microphone (noise handling)</summary>
+      <div class="settings small">
+        <div class="row floor-row">
+          <div><strong>Noise floor</strong> <span id="floor-readout" class="muted">not measured yet</span><br><span id="floor-when" class="muted"></span></div>
+          <button id="measure-btn">Measure now</button>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-gate"> Noise gate</label>
+        <div id="gate-opts">
+          <label class="toggle"><input type="checkbox" id="set-auto"> Auto threshold</label>
+          <label id="row-margin">Above noise floor <input id="set-margin" type="range" min="3" max="30" step="1"> <output for="set-margin"></output> dB</label>
+          <label id="row-thr">Threshold <input id="set-thr" type="range" min="-80" max="-20" step="1"> <output for="set-thr"></output> dB</label>
+          <label>Attack <input id="set-attack" type="range" min="1" max="100" step="1"> <output for="set-attack"></output> ms</label>
+          <label>Hold <input id="set-hold" type="range" min="0" max="500" step="5"> <output for="set-hold"></output> ms</label>
+          <label>Release <input id="set-release" type="range" min="5" max="500" step="5"> <output for="set-release"></output> ms</label>
+          <label class="toggle"><input type="checkbox" id="set-dropquiet"> Ignore notes below the gate</label>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-hpf"> Rumble filter (high-pass)</label>
+        <label id="row-hpf">Cutoff <input id="set-hpfhz" type="range" min="40" max="80" step="5"> <output for="set-hpfhz"></output> Hz</label>
+        <div class="row"><button id="set-reset">Reset to defaults</button></div>
+        <p class="muted" id="gate-help"></p>
+      </div>
+    </details>
   </section>
 
   <section class="card" id="transcribe">
@@ -63,7 +87,14 @@
   </section>
 
   <section class="card" id="results" hidden>
-    <h2>3. Notes</h2>
+    <div class="row">
+      <h2 class="inline">3. Take</h2>
+      <div class="seg" role="tablist" aria-label="View">
+        <button id="view-roll" role="tab" aria-selected="true" class="on">Piano roll</button>
+        <button id="view-page" role="tab" aria-selected="false">Page</button>
+      </div>
+      <button id="rerec-btn" class="rec-again" title="Record a new take">● Record again</button>
+    </div>
     <div class="row">
       <button id="play-btn">▶ Play notes</button>
       <button id="play-orig-btn">▶ Play original</button>
@@ -71,9 +102,30 @@
       <button id="midi-btn">Download MIDI</button>
       <span id="summary" class="muted"></span>
     </div>
-    <canvas id="roll" height="320"></canvas>
-    <h3>Staff <span class="muted small" id="quant-info"></span></h3>
-    <div id="staff"></div>
+    <div id="roll-view"><canvas id="roll" height="320"></canvas></div>
+    <div id="page-view" hidden>
+      <div class="row page-head">
+        <button id="tempo-btn" class="tempo-mark" aria-label="Assumed tempo" title="Adjust the tempo used to choose note lengths"><span id="tempo-mark">♩ = 120</span> <span class="muted small" id="tempo-note">Assumed tempo</span></button>
+        <span class="muted small" id="quant-info"></span>
+      </div>
+      <div id="tempo-panel" class="inner" hidden>
+        <div class="row">
+          <button id="tempo-dec" aria-label="Slower">−</button>
+          <input id="tempo-num" type="number" min="20" max="300" step="1" value="120" aria-label="Quarter notes per minute">
+          <button id="tempo-inc" aria-label="Faster">+</button>
+          <input id="tempo-slider" type="range" min="20" max="300" step="1" value="120" aria-label="Tempo">
+        </div>
+        <div class="row">
+          <button id="tempo-half" aria-label="Half tempo">½×</button>
+          <button id="tempo-tap">Tap tempo</button>
+          <button id="tempo-double" aria-label="Double tempo">2×</button>
+          <button id="tempo-est">Use estimated tempo</button>
+          <button id="tempo-done">Done</button>
+        </div>
+        <p class="muted small">The tempo decides note lengths: at double the tempo the same notes read twice as long (eighths become quarters).</p>
+      </div>
+      <div id="staff"></div>
+    </div>
     <details>
       <summary>Note list</summary>
       <table id="note-table"><thead><tr><th>#</th><th>Pitch</th><th>MIDI</th><th>Start (s)</th><th>Dur (s)</th><th>Amp</th></tr></thead><tbody></tbody></table>
@@ -83,10 +135,10 @@
   <section class="card small muted" id="about">
     <h2>How it works</h2>
     <ol>
-      <li>Mic audio is captured by an <code>AudioWorklet</code> in a 22,050 Hz <code>AudioContext</code> and streamed to a Web Worker; uploads are resampled with an <code>OfflineAudioContext</code>.</li>
+      <li>Mic audio is captured by an <code>AudioWorklet</code> in a 22,050 Hz <code>AudioContext</code>, cleaned up like the iOS app (70 Hz rumble filter, adaptive noise floor, noise gate 10 dB above it) and streamed to a Web Worker; uploads are resampled with an <code>OfflineAudioContext</code>.</li>
       <li>The worker runs each 2-second window (43,844 samples) as soon as it fills, every ~0.5 s live (~0.8 s for files), keeping only the newest frames of each window, through Spotify's <a href="https://github.com/spotify/basic-pitch">Basic Pitch</a> (ICASSP 2022, ~0.9 MB TF.js graph) on WebGPU, WebGL or WASM.</li>
       <li>The note and onset heads are decoded into notes with Basic Pitch's own JS port of <code>note_creation.py</code>; live, the latest ~15 s are re-decoded after every window and older notes are frozen.</li>
-      <li>A JS port of EarSheet's quantizer estimates tempo, meter and key and snaps to 16ths for the staff (rendered with abcjs).</li>
+      <li>Piano roll first: live and after a take you see the piano roll. Only when you open <b>Page</b> (or export MIDI) does a JS port of EarSheet's quantizer estimate the whole take's tempo, meter and key and snap to 16ths; the result is cached, and the adjustable <b>♩ = N · Assumed tempo</b> mark re-quantizes it. The grand staff (split at middle C) is rendered with abcjs.</li>
     </ol>
     <p>Model and decoder: © Spotify AB, Apache-2.0. TensorFlow.js: Apache-2.0. abcjs and @tonejs/midi: MIT. Source: <code>web/</code> in the EarSheet repo.</p>
   </section>

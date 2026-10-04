@@ -31,22 +31,30 @@ function estimateBeat(onsets) {
   if (!cands.length) cands = [0.5];
   let best = [cands[0], onsets[0]], bestScore = -1;
   for (const q of cands) {
-    for (const anchor of onsets.slice(0, 3)) {
-      const phase = anchor % q;
-      let score = 0;
-      const tol = 0.10 * q;
-      for (const o of onsets) {
-        let d = fmod(o - phase, q);
-        d = Math.min(d, q - d);
-        if (d < tol) score += 1 - d / tol;
-      }
-      score *= 1 + 0.05 * Math.exp(-(((60 / q - 90) / 60) ** 2));
-      if (score > bestScore) { bestScore = score; best = [q, phase]; }
-    }
+    const [phase, raw] = bestPhase(onsets, q);
+    const score = raw * (1 + 0.05 * Math.exp(-(((60 / q - 90) / 60) ** 2))); // mild prior near 90 BPM
+    if (score > bestScore) { bestScore = score; best = [q, phase]; }
   }
-  let [q, phase] = best;
+  return best;
+}
+
+/** Best beat-grid phase for a fixed quarter length (Quantize.swift bestPhase), at or before the first onset. */
+function bestPhase(onsets, q) {
+  let best = [onsets[0], -1];
+  for (const anchor of onsets.slice(0, 3)) {
+    const phase = anchor % q;
+    let score = 0;
+    const tol = 0.10 * q;
+    for (const o of onsets) {
+      let d = fmod(o - phase, q);
+      d = Math.min(d, q - d);
+      if (d < tol) score += 1 - d / tol;
+    }
+    if (score > best[1]) best = [phase, score];
+  }
+  let phase = best[0];
   while (phase > onsets[0]) phase -= q;
-  return [q, phase];
+  return [phase, best[1]];
 }
 
 function estimateMeter(onsets, quarterLen, beatPhase) {
@@ -89,13 +97,20 @@ function estimateKey(notes) {
   return best;
 }
 
-/** notes: [{midi, onset, offset, velocity}] in seconds. */
+/** Allowed assumed tempo range (quarter-note BPM), as Quantizer.tempoRange. */
+export const TEMPO_RANGE = [20, 300];
+export const clampTempo = (b) => Math.min(TEMPO_RANGE[1], Math.max(TEMPO_RANGE[0], b));
+export const metronomeMark = (bpm) => `\u2669 = ${Math.round(bpm)}`;
+
+/** notes: [{midi, onset, offset, velocity}] in seconds. bpm: assumed quarter-note tempo
+ *  (null estimates it; a value skips tempo estimation but still fits the grid phase, meter and key).
+ *  The tempo decides note values: the same audio at 2x the BPM reads as notes twice as long. */
 export function quantize(events, { bpm = null } = {}) {
   const notes = events.filter((n) => n.midi >= 21 && n.midi <= 108 && n.offset > n.onset).sort((a, b) => a.onset - b.onset);
   if (!notes.length) return { notes: [], bpm: 120, meter: '4/4', key: { tonic: 0, minor: false }, sixteenth: 0.125 };
   const onsets = notes.map((n) => n.onset);
   let [quarter, beatPhase] = estimateBeat(onsets);
-  if (bpm) { quarter = 60 / bpm; beatPhase = onsets[0]; }
+  if (bpm) { quarter = 60 / clampTempo(bpm); beatPhase = bestPhase(onsets, quarter)[0]; }
   const [meter, barPhase] = estimateMeter(onsets, quarter, beatPhase);
   const key = estimateKey(notes);
   const s16 = quarter / 4;
@@ -149,11 +164,29 @@ function abcPitch({ letter, octave }) {
   return s;
 }
 
-const PIECES = [16, 12, 8, 6, 4, 3, 2, 1];
-function splitDur(d) { const out = []; for (const p of PIECES) while (d >= p) { out.push(p); d -= p; } return out; }
+const PIECES = [16, 12, 8, 6, 4, 3, 2, 1]; // writable lengths in 16ths (whole … 16th, with dots)
 
-/** One voice of chords/rests -> ABC body, with bar lines and ties. */
-function voiceToAbc(notes, bar16, total16, fifths) {
+/** Splits `len` 16ths starting at bar position `pos` into writable values (Engraver.swift build 13):
+ *  an off-beat start first fills its beat, and in 4/4 a note never hides beat 3 (the middle of the
+ *  bar) unless it starts the bar. The pieces are tied. */
+function writable(pos, len, bar16, beat16) {
+  const out = [];
+  while (len > 0) {
+    const inBar = pos % bar16, off = inBar % beat16;
+    let max = len;
+    if (off) max = Math.min(max, beat16 - off);
+    else if (bar16 === 16 && inBar !== 0 && inBar < 8 && inBar + len > 8) max = Math.min(max, 8 - inBar);
+    const p = PIECES.find((v) => v <= max) || 1;
+    out.push(p); pos += p; len -= p;
+  }
+  return out;
+}
+
+/** One voice of chords/rests -> ABC body, with bar lines, ties (also across bars/system breaks)
+ *  and beams: notes shorter than a beat are written without spaces inside a beat so abcjs beams
+ *  them (8ths in pairs, 16ths in fours); a space at every beat breaks the beam. Chords share one
+ *  stem ([CEG]); accidentals follow the key signature, reset per bar, per staff position. */
+function voiceToAbc(notes, bar16, total16, fifths, beat16) {
   const keyAcc = keyAccidentals(fifths);
   // Group notes by start; chord length = min(own durations, next onset - start).
   const byStart = new Map();
@@ -190,33 +223,33 @@ function voiceToAbc(notes, bar16, total16, fifths) {
   for (const ev of events) {
     let remaining = ev.dur;
     while (remaining > 0) {
-      const inBar = bar16 - (pos % bar16);
-      const chunk = Math.min(remaining, inBar);
-      const pieces = splitDur(chunk);
+      const chunk = Math.min(remaining, bar16 - (pos % bar16));
+      const pieces = writable(pos, chunk, bar16, beat16);
       pieces.forEach((p, i) => {
-        const last = i === pieces.length - 1 && remaining - chunk === 0;
-        if (ev.midis) out += tokenFor(ev.midis, p) + (last ? ' ' : '-');
-        else out += `z${p === 1 ? '' : p} `;
+        const tied = !(i === pieces.length - 1 && remaining - chunk === 0);
+        out += ev.midis ? tokenFor(ev.midis, p) + (tied ? '-' : '') : `z${p === 1 ? '' : p}`;
+        pos += p;
+        // Break the beam at beat boundaries, around beat-or-longer values and around rests.
+        if (pos % beat16 === 0 || p >= beat16 || !ev.midis) out += ' ';
       });
-      pos += chunk;
       remaining -= chunk;
       if (pos % bar16 === 0) {
         barAcc = new Map();
-        const barNo = pos / bar16;
-        out += barNo % 4 === 0 ? '|\n' : '| ';
+        out = out.replace(/ ?$/, ' ') + ((pos / bar16) % 4 === 0 ? '|\n' : '| ');
       }
     }
   }
   return out.trim();
 }
 
-export function toAbc(score, { maxBars = 24, lastBars = 0 } = {}) {
+/** Grand staff split at C4 (middle C and up on the treble staff). `tempo`: put the ♩ = N mark on
+ *  the page (Q:); the app shows its own adjustable mark above the staff instead. */
+export function toAbc(score, { maxBars = 400, lastBars = 0, tempo = false } = {}) {
   const m = METERS[score.meter];
   const fifths = keyFifths(score.key);
   if (!score.notes.length) return null;
   const end = Math.max(...score.notes.map((n) => n.start16 + n.dur16));
   const allBars = Math.max(1, Math.ceil(end / m.bar16));
-  // lastBars: live view of the most recent bars; otherwise the first maxBars.
   const firstBar = lastBars ? Math.max(0, allBars - lastBars) : 0;
   const bars = lastBars ? allBars - firstBar : Math.min(maxBars, allBars);
   const off16 = firstBar * m.bar16;
@@ -225,12 +258,12 @@ export function toAbc(score, { maxBars = 24, lastBars = 0 } = {}) {
     .map((n) => ({ ...n, start16: n.start16 - off16, dur16: Math.min(n.dur16, total16 - (n.start16 - off16)) }));
   const treble = visible.filter((n) => n.midi >= 60);
   const bass = visible.filter((n) => n.midi < 60);
-  const unitNote = m.unit === 8 ? '1/16' : '1/16';
+  const beat16 = m.unit === 8 ? 6 : 4; // 6/8 beams in dotted quarters
   return [
-    'X:1', `M:${score.meter}`, `L:${unitNote}`, `Q:1/4=${Math.round(score.bpm)}`,
-    '%%score {RH LH}', 'V:RH clef=treble', 'V:LH clef=bass', `K:${keyName(score.key)}`,
-    '[V:RH] ' + voiceToAbc(treble, m.bar16, total16, fifths),
-    '[V:LH] ' + voiceToAbc(bass, m.bar16, total16, fifths),
+    'X:1', `M:${score.meter}`, 'L:1/16', ...(tempo ? [`Q:1/4=${Math.round(score.bpm)}`] : []),
+    '%%stretchlast 1', '%%score {RH LH}', 'V:RH clef=treble', 'V:LH clef=bass', `K:${keyName(score.key)}`,
+    '[V:RH] ' + voiceToAbc(treble, m.bar16, total16, fifths, beat16),
+    '[V:LH] ' + voiceToAbc(bass, m.bar16, total16, fifths, beat16),
   ].join('\n');
 }
 

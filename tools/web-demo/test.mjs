@@ -1,6 +1,8 @@
 // Headless end-to-end test of web/: serves it under /earsheet/ (like GitHub Pages),
 // feeds generated WAVs through the file input on each backend, and checks the notes.
-// Usage: node test.mjs [--model=stock|ft] [--url=https://grepawk.com/music-hear/] [--backends=auto,webgl,wasm] [--chrome=/usr/bin/google-chrome] [--shot=path.png]
+// Also checks the iOS-port behaviour: piano roll first (no sheet analysis until Page/export, then
+// cached), the adjustable assumed tempo (stepper, ½×/2×, tap) re-quantizing the sheet.
+// Usage: node test.mjs [--model=stock|ft] [--url=https://grepawk.com/music-hear/] [--backends=auto,webgl,wasm] [--chrome=/usr/bin/google-chrome] [--shot=path.png] [--shotdir=dir]
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -90,12 +92,16 @@ for (const backend of backends) {
   console.log(`page ${backend} model=${args.model || 'stock'}: backend=${init.backend} crossOriginIsolated=${init.isolated} warmup=${Math.round(init.warmupMs)}ms`);
   if (!init.ready) { console.log(`backend ${backend}: NOT READY`, init, logs.slice(-10)); report.push({ requested: backend, init }); failed++; await page.close(); continue; }
   for (const [name, c] of Object.entries(CASES)) {
+    const runsBefore = await page.evaluate(() => window.__earsheet.analysisRuns);
     await page.evaluate(() => { window.__earsheet.lastResult = null; });
     await page.setInputFiles('#file-input', files[name]);
     await page.waitForFunction(() => window.__earsheet.lastResult, null, { timeout: 300000 });
     const r = await page.evaluate(() => window.__earsheet.lastResult);
     const s = score(c.events.map(([m, t]) => [m, t]), r.notes);
-    const ok = s.tp === s.expected && s.extra.length <= Math.floor(args.maxExtra ?? 2);
+    const ui = await page.evaluate(() => ({ runs: window.__earsheet.analysisRuns, view: window.__earsheet.view, pageHidden: document.getElementById('page-view').hidden, summary: document.getElementById('summary').textContent }));
+    const rollFirst = ui.runs === runsBefore && ui.view === 'roll' && ui.pageHidden && !/♩|BPM/.test(ui.summary);
+    if (!rollFirst) console.log(`piano-roll-first violated on ${name}:`, ui);
+    const ok = rollFirst && s.tp === s.expected && s.extra.length <= Math.floor(args.maxExtra ?? 2);
     if (!ok) failed++;
     const row = { requested: backend, backend: r.backend, case: name, ok, ...s, ms: Math.round(r.inference.ms), windows: r.inference.windows, msPerWindow: Math.round(r.inference.msPerWindow), rtf: +r.inference.rtf.toFixed(1), bpm: Math.round(r.bpm), meter: r.meter, key: r.key, warmupMs: Math.round(init.warmupMs), notes: r.notes.map((n) => `${n.name}@${n.onset}`).join(' ') };
     report.push(row);
@@ -104,6 +110,42 @@ for (const backend of backends) {
       await page.waitForTimeout(300);
       await page.screenshot({ path: args.shot, fullPage: true });
     }
+  }
+  if (backend === backends[0]) {
+    // Page view + assumed tempo on the last case (two-hands).
+    const shot = async (n) => { if (args.shotdir) { await page.waitForTimeout(250); await page.screenshot({ path: join(args.shotdir, n), fullPage: true }); } };
+    await shot('after-file-roll.png');
+    const st = () => page.evaluate(() => ({ runs: window.__earsheet.analysisRuns, bpm: window.__earsheet.score && Math.round(window.__earsheet.score.bpm), dur: window.__earsheet.score && window.__earsheet.score.notes.reduce((a, n) => a + n.dur16, 0), mark: document.getElementById('tempo-mark').textContent, summary: document.getElementById('summary').textContent, svg: !!document.querySelector('#staff svg'), override: window.__earsheet.tempoOverride }));
+    const r0 = await st();
+    await page.click('#view-page');
+    const r1 = await st();
+    await page.click('#view-roll'); await page.click('#view-page');
+    const r2 = await st();
+    await shot('after-file-page.png');
+    await page.click('#tempo-btn');
+    await page.click('#tempo-double');
+    const r3 = await st();
+    await shot('after-file-page-tempo-2x.png');
+    await page.click('#tempo-half');
+    await page.click('#tempo-inc');
+    const r4 = await st();
+    for (let i = 0; i < 4; i++) { await page.click('#tempo-tap'); await page.waitForTimeout(500); }
+    const r5 = await st();
+    await page.click('#tempo-est');
+    const r6 = await st();
+    const checks = {
+      'no analysis before Page': r0.runs === runsAt(r0),
+      'Page runs the analysis once': r1.runs === r0.runs + 1 && r1.svg && /♩ = \d+/.test(r1.mark) && /♩/.test(r1.summary),
+      'analysis cached across view switches': r2.runs === r1.runs,
+      '2× doubles tempo and note lengths': r3.bpm === Math.min(300, 2 * r1.bpm) && r3.dur >= 1.8 * r1.dur && r3.override === r3.bpm,
+      '½× then + steps': r4.bpm === Math.round(r3.bpm / 2) + 1,
+      'tap tempo ≈ 120': Math.abs(r5.bpm - 120) <= 12,
+      'back to estimated': r6.bpm === r1.bpm && r6.override == null,
+    };
+    function runsAt(x) { return x.runs; }
+    for (const [k, v] of Object.entries(checks)) { console.log(`${v ? 'ok  ' : 'FAIL'} ${k}`); if (!v) failed++; }
+    console.log('tempo states', JSON.stringify({ r0, r1, r3, r4, r5, r6 }));
+    report.push({ requested: backend, page: { checks, r1, r3, r5 } });
   }
   // Second run on the longest case = steady-state timing (shaders compiled).
   const errs = logs.filter((l) => /error/i.test(l));
