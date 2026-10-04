@@ -54,21 +54,38 @@ struct LibraryView: View {
                 .background(Ink.paper)
                 .padding(.bottom, 130) // clear the floating mic button
 
-                // Mic button + caption.
+                // Mic button + caption, with a video-import button beside the mic.
                 VStack(spacing: 10) {
-                    Button(action: startListening) {
-                        ZStack {
-                            Circle()
-                                .fill(Ink.teal)
-                                .frame(width: 76, height: 76)
-                                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.white)
+                    HStack(spacing: 20) {
+                        // Balance the video button's width so the mic stays centered.
+                        Spacer().frame(width: 56)
+                        Button(action: startListening) {
+                            ZStack {
+                                Circle()
+                                    .fill(Ink.teal)
+                                    .frame(width: 76, height: 76)
+                                    .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 30))
+                                    .foregroundStyle(.white)
+                            }
                         }
+                        .accessibilityLabel("Listen to music")
+                        .accessibilityHint("Starts listening and writes the score as you play")
+                        Button(action: { showVideoPicker = true }) {
+                            ZStack {
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 56, height: 56)
+                                    .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                                Image(systemName: "video.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(Ink.teal)
+                            }
+                        }
+                        .accessibilityLabel("Import video from Photos")
+                        .accessibilityHint("Chooses a video and transcribes its audio")
                     }
-                    .accessibilityLabel("Listen to music")
-                    .accessibilityHint("Starts listening and writes the score as you play")
                     Text("Tap to listen — AI Music Radar writes the score as you play.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
