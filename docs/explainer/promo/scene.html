@@ -1,0 +1,262 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{overflow:hidden}
+body{font-family:'Inter',sans-serif;background:#f3b79c;position:relative}
+#bg{position:absolute;inset:0;background:linear-gradient(160deg,#fbe3d3 0%,#f6c4aa 55%,#ee9f84 100%)}
+#bgroll{position:absolute;inset:0}
+#cam{position:absolute;left:0;top:0;transform-origin:0 0}
+.phone{position:absolute;width:421px;height:880px;left:-210.5px;top:-440px;border-radius:66px;background:#1b1b1d;padding:14px;box-shadow:0 40px 90px rgba(80,30,10,.35),inset 0 0 0 2px #3a3a3e}
+.screen{position:relative;width:393px;height:852px;border-radius:54px;overflow:hidden;background:#faf8f2;color:#1c1c1c}
+.island{position:absolute;left:50%;top:11px;width:124px;height:36px;margin-left:-62px;background:#000;border-radius:20px;z-index:50}
+.status{position:absolute;top:0;left:0;right:0;height:54px;display:flex;justify-content:space-between;align-items:center;padding:6px 34px 0 46px;font-weight:600;font-size:17px;z-index:40}
+.status .ic{font-size:13px;letter-spacing:2px}
+.scr{position:absolute;inset:0;padding-top:54px;background:#faf8f2}
+.nav{height:44px;display:flex;align-items:center;padding:0 14px;color:#2b7de9;font-size:17px}
+.nav .chev{font-size:26px;margin-right:4px;transform:translateY(-1px)}
+.big{font-size:34px;font-weight:700;padding:4px 18px 10px}
+.sec{font-size:13px;color:#8a8a8a;padding:14px 30px 6px;letter-spacing:.3px}
+.row{display:flex;align-items:center;padding:9px 18px 9px 28px;position:relative}
+.row .pb{width:32px;height:32px;border-radius:50%;background:#b9d6d3;display:flex;align-items:center;justify-content:center;color:#0c6b6b;font-size:13px;margin-right:13px;flex:none}
+.row b{display:block;font-size:16px;font-weight:600}
+.row span{font-size:13px;color:#8a8a8a}
+.row .gt{position:absolute;right:26px;color:#c4c4c4;font-size:20px}
+.row:after{content:'';position:absolute;left:73px;right:14px;bottom:0;height:1px;background:#e7e5df}
+.mic{position:absolute;left:50%;bottom:44px;width:62px;height:62px;margin-left:-31px;border-radius:50%;background:#0c6b6b;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(12,107,107,.35)}
+.serif{font-family:'Noto Serif',serif}
+.tap{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:rgba(255,255,255,.55);border:3px solid rgba(255,255,255,.95);box-shadow:0 0 0 2px rgba(0,0,0,.08);z-index:60;pointer-events:none}
+.seg{margin:0 16px 8px;background:#ecebe6;border-radius:9px;height:32px;display:flex;position:relative;font-size:13px;font-weight:600}
+.seg div{flex:1;display:flex;align-items:center;justify-content:center;z-index:2}
+.seg .knob{position:absolute;top:2px;bottom:2px;width:calc(50% - 2px);background:#fff;border-radius:7px;box-shadow:0 1px 3px rgba(0,0,0,.12);z-index:1}
+.bar{position:absolute;left:0;right:0;bottom:34px;display:flex;justify-content:center;align-items:center;gap:30px}
+.play{width:46px;height:46px;border-radius:50%;background:#0c6b6b;display:flex;align-items:center;justify-content:center}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.18);padding:10px 20px 40px;z-index:30}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:11px 18px;border-radius:24px;background:#1f1f1f;color:#fff;font-weight:600;font-size:16px;margin:5px}
+.pill small{font-size:10px;background:#f5b84a;color:#2a1610;border-radius:6px;padding:2px 5px;font-weight:700}
+#caps{position:absolute;inset:0;pointer-events:none}
+.cap{position:absolute;font-family:'Poppins','Noto Color Emoji',sans-serif;font-weight:800;color:#2a1610;line-height:1.04;letter-spacing:-1.5px}
+.cap .sub{display:block;font-family:'Inter',sans-serif;font-weight:600;letter-spacing:-.3px;color:#7a3d24;margin-top:18px;line-height:1.25}
+.chip{display:inline-block;background:#0c6b6b;color:#fff;border-radius:14px;padding:4px 16px 6px;margin-bottom:16px;font-size:.36em;letter-spacing:0}
+.tt{background:#fff;color:#111;padding:.06em .28em;border-radius:.2em;box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.42;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.tt .hl{background:#ffd84d;color:#111;padding:0 .1em}
+.hl{background:#2a1610;color:#fbe3d3;padding:0 .18em;border-radius:.12em}
+</style></head><body>
+<div id="bg"></div><canvas id="bgroll"></canvas>
+<div id="cam"><div class="phone" id="phone"><div class="screen" id="screen">
+ <div class="island"></div>
+ <div class="status"><span>9:41</span><span class="ic">▂▄▆ ◉ ▭</span></div>
+ <!-- LIST -->
+ <div class="scr" id="s-list">
+  <div class="nav" style="justify-content:flex-end"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2b7de9" stroke-width="1.8"><path d="M12 3v12M7 10l5 5 5-5M4 15v5h16v-5"/></svg></div>
+  <div class="big">Sheets</div>
+  <div class="sec">SAMPLES</div>
+  <div class="row"><div class="pb">▶</div><div><b>C Major Scale</b><span>Sample · 8 notes · 0:04</span></div><div class="gt">›</div></div>
+  <div class="sec" style="padding-top:22px">MY TAKES</div>
+  <div id="newtake"></div>
+  <div class="row"><div class="pb">▶</div><div><b>Take 5</b><span>Today · 58 notes · 0:22</span></div><div class="gt">›</div></div>
+  <div class="row"><div class="pb">▶</div><div><b>Take 4</b><span>Today · 33 notes · 0:15</span></div><div class="gt">›</div></div>
+  <div class="row"><div class="pb">▶</div><div><b>Take 3</b><span>Today · 105 notes · 0:40</span></div><div class="gt">›</div></div>
+  <div class="row"><div class="pb">▶</div><div><b>Take 2</b><span>Yesterday · 41 notes · 0:18</span></div><div class="gt">›</div></div>
+  <div class="mic"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3" fill="#fff"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+ </div>
+ <!-- LISTEN -->
+ <div class="scr" id="s-listen">
+  <div class="nav"><span style="color:#2b7de9">Cancel</span></div>
+  <div class="serif" style="text-align:center;color:#7d7d7d;font-size:17px;padding:12px 34px 0;line-height:1.35">Play music near your phone — notes appear as they are heard.</div>
+  <div style="margin:16px 48px;height:4px;border-radius:2px;background:#e6e6e6;position:relative"><div id="lvl" style="position:absolute;left:0;top:0;bottom:0;background:#0c6b6b;border-radius:2px;width:0"></div></div>
+  <canvas id="live" style="display:block;margin:0 12px;width:369px;height:220px;border-radius:6px"></canvas>
+  <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:20px;font-family:'DejaVu Sans Mono',monospace;font-size:17px"><span style="width:8px;height:8px;border-radius:50%;background:#e33;display:inline-block"></span><span id="timer">0:00 / 1:00</span></div>
+  <div style="position:absolute;left:50%;bottom:48px;margin-left:-38px;width:76px;height:76px;border-radius:50%;border:1px solid rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center"><div style="width:30px;height:30px;border-radius:8px;background:#1c1c1c"></div></div>
+ </div>
+ <!-- DETAIL -->
+ <div class="scr" id="s-detail">
+  <div class="nav"><span class="chev">‹</span>Sheets</div>
+  <div class="serif" style="text-align:center;font-size:22px;margin-top:2px">Take 6</div>
+  <div id="dcap" style="text-align:center;color:#8a8a8a;font-size:15px;padding:6px 0 10px">20 notes · 0:08</div>
+  <div class="seg"><div class="knob" id="knob"></div><div>Piano roll</div><div>Page</div></div>
+  <div id="d-roll" style="position:absolute;left:16px;right:16px;top:200px"><canvas id="roll" style="width:361px;height:300px;display:block"></canvas></div>
+  <div id="d-page" style="position:absolute;left:0;right:0;top:196px;background:#fff;height:520px">
+   <div id="analyzing" style="text-align:center;color:#8a8a8a;padding-top:50px;font-size:15px">◌ Analyzing tempo and key…</div>
+   <div id="pagebody">
+    <div style="padding:10px 16px 0;font-family:'Noto Serif',serif;font-size:16px;display:flex;align-items:center;gap:8px"><b style="font-size:18px">♩ = 120</b><span style="font-size:12px;color:#8a8a8a;border:1px solid #ddd;border-radius:6px;padding:1px 6px;font-family:Inter">assumed</span></div>
+    <div id="staff" style="padding:0 4px"></div>
+   </div>
+  </div>
+  <div class="bar">
+   <div class="play" id="playbtn"><svg width="18" height="18" viewBox="0 0 24 24" id="playic"><path d="M7 4l13 8-13 8z" fill="#fff"/></svg></div>
+   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1c1c1c" stroke-width="1.6"><path d="M12 3v12M8 7l4-4 4 4M5 11v10h14V11"/></svg>
+   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1c1c1c" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l6-5 4 3 3-2 4 3"/></svg>
+   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0c6b6b" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+  </div>
+  <div class="sheet" id="exp">
+   <div style="width:36px;height:5px;border-radius:3px;background:#ddd;margin:0 auto 14px"></div>
+   <div style="font-weight:700;font-size:17px;text-align:center;margin-bottom:12px">Export</div>
+   <div style="text-align:center"><span class="pill" id="p-pdf">PDF</span><span class="pill">MIDI <small>PRO</small></span><span class="pill">MusicXML <small>PRO</small></span><span class="pill">MP3</span><span class="pill">PNG photo</span></div>
+  </div>
+ </div>
+ <div class="tap" id="tap"></div>
+</div></div></div>
+<div id="caps"></div>
+<script src="data.js"></script><script src="../../../web/vendor/abcjs-basic-min.js"></script>
+<script>
+const Q=new URLSearchParams(location.search), MODE=Q.get('mode')||'landing';
+const W=MODE==='tiktok'?1080:1920, H=MODE==='tiktok'?1920:1080;
+document.body.style.width=W+'px';document.body.style.height=H+'px';
+const $=id=>document.getElementById(id);
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const prog=(t,a,b)=>clamp((t-a)/(b-a));
+const ease=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const back=x=>{const c=1.7;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2)};
+const D=window.DATA;
+// staff
+const ABC="X:1\nM:4/4\nL:1/16\nK:Am\nE4 G2 A2 c4 B2 A2 | G4 E2 G2 A8 |\nA4 c2 d2 e4 d2 c2 | d4 B2 G2 c6-c z |]";
+ABCJS.renderAbc('staff',ABC,{staffwidth:352,add_classes:true,paddingtop:4,paddingbottom:4,paddingleft:6,paddingright:6,scale:1.0});
+const svg=$('staff').querySelector('svg');
+const staffNotes=[...svg.querySelectorAll('.abcjs-note')];
+const noteIdx=i=>Math.min(i,19);
+function setupCanvas(c,w,h){c.width=w*3;c.height=h*3;const x=c.getContext('2d');x.scale(3,3);return x}
+const lctx=setupCanvas($('live'),369,220), rctx=setupCanvas($('roll'),361,300);
+const BLACK=new Set([1,3,6,8,10]);
+function range(ms){if(!ms.length)return[55,79];let lo=Math.min(...ms)-2,hi=Math.max(...ms)+2;if(hi-lo+1<25){const p=Math.ceil((25-(hi-lo+1))/2);lo-=p;hi+=p}return[Math.max(21,lo),Math.min(108,hi)]}
+function grid(ctx,w,h,lo,hi){const rows=hi-lo+1,rh=h/rows;ctx.fillStyle='#f5f5f5';ctx.fillRect(0,0,w,h);
+ for(let m=lo;m<=hi;m++){const y=(hi-m)*rh;if(BLACK.has(m%12)){ctx.fillStyle='#e6e6e6';ctx.fillRect(0,y,w,rh)}
+ if(m%12==0){ctx.fillStyle='#8a8a8a';ctx.font='9px Inter';ctx.fillText('C'+(m/12-1),4,y+rh/2+3)}}return rh}
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function drawLive(notes,now,lag=0.3){const w=369,h=220,win=10,t0=now-win;
+ const vis=notes.filter(n=>n[1]+lag<=now);const [lo,hi]=range(vis.map(n=>n[0]));const rh=grid(lctx,w,h,lo,hi);
+ const X=t=>(t-t0)/win*w;
+ for(const n of vis){const end=Math.min(now,Math.max(n[1]+n[2],n[1]+.08));const x0=Math.max(0,X(n[1])),x1=Math.min(w,X(end));
+  const a=clamp((now-n[1]-lag)/.4,.35,1);lctx.fillStyle=`rgba(51,115,217,${a})`;rr(lctx,x0,(hi-n[0])*rh+rh*.1,Math.max(3,x1-x0),Math.max(2,rh*.8),2)}
+ return vis.length}
+function drawRoll(notes,dur,play,beat){const w=361,h=300;const [lo,hi]=range(notes.map(n=>n[0]));const rh=grid(rctx,w,h,lo,hi);const X=t=>t/dur*w;
+ if(beat){rctx.fillStyle='rgba(0,0,0,.08)';for(let b=0;b<dur;b+=0.5)rctx.fillRect(X(b),0,b%2==0?1.2:.6,h)}
+ for(const n of notes){const on=play!=null&&play>=n[1]&&play<n[1]+n[2];rctx.fillStyle=on?'#e8553a':'#3373d9';rr(rctx,X(n[1]),(hi-n[0])*rh+rh*.1,Math.max(3,X(n[2])-1),rh*.8,2)}
+ if(play!=null){rctx.fillStyle='rgba(232,85,58,.6)';rctx.fillRect(X(play),0,1.5,h)}}
+function hlStaff(play){staffNotes.forEach((e,i)=>{const n=D.piano[noteIdx(i)];const on=play!=null&&n&&play>=n[1]-0.02&&play<n[1]+Math.max(.25,n[2]*.9);
+ e.querySelectorAll('path').forEach(p=>p.setAttribute('fill',on?'#d98e00':'#000'));
+ let g=e.querySelector('.glow');
+ if(on&&!g){let hb=null;e.querySelectorAll('path').forEach(p=>{const bb=p.getBBox();if(bb.height<13&&bb.width>5&&bb.width<14)hb=bb});if(!hb)hb=e.getBBox();g=document.createElementNS('http://www.w3.org/2000/svg','ellipse');g.setAttribute('class','glow');g.setAttribute('cx',hb.x+hb.width/2);g.setAttribute('cy',hb.y+hb.height/2);g.setAttribute('rx',11);g.setAttribute('ry',9);g.setAttribute('fill','rgba(255,204,0,.6)');e.insertBefore(g,e.firstChild)}
+ if(!on&&g)g.remove()})}
+const fmt=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+// ---------- shared phone state ----------
+function phone(st){
+ const S={list:$('s-list'),listen:$('s-listen'),detail:$('s-detail')};
+ for(const k in S){S[k].style.display='none';S[k].style.transform='';S[k].style.zIndex=1}
+ const show=(k,x=0,z=1)=>{S[k].style.display='block';S[k].style.transform=`translateX(${x}px)`;S[k].style.zIndex=z};
+ if(st.trans){const [a,b,p,dir]=st.trans;const e=ease(p);
+   if(dir==='up'){show(a,0,1);show(b,0,2);S[b].style.transform=`translateY(${(1-e)*852}px)`}
+   else if(dir==='down'){show(b,0,1);show(a,0,2);S[a].style.transform=`translateY(${e*852}px)`}
+   else{show(a,-e*120,1);show(b,(1-e)*393,2)}}
+ else show(st.screen);
+ $('newtake').innerHTML=st.newTake?`<div class="row" style="background:rgba(12,107,107,${0.12*(st.newTake)})"><div class="pb">▶</div><div><b>Take 6</b><span>Today · 20 notes · 0:08</span></div><div class="gt">›</div></div>`:'';
+ if(st.live){const [notes,now]=st.live;drawLive(notes,now);$('timer').textContent=fmt(now)+' / 1:00';
+   const act=notes.some(n=>now>=n[1]&&now<n[1]+n[2]);$('lvl').style.width=(act?40+30*Math.abs(Math.sin(now*9)):6)+'%'}
+ const tab=st.tab||'roll';$('knob').style.left=(tab==='page'?'calc(50%)':'2px');
+ $('d-roll').style.display=tab==='roll'?'block':'none';$('d-page').style.display=tab==='page'?'block':'none';
+ $('analyzing').style.display=st.analyzing?'block':'none';$('pagebody').style.display=st.analyzing?'none':'block';
+ $('dcap').textContent=st.sheetReady?'≈120 BPM · 4/4 · A minor · 20 notes':'20 notes · 0:08';
+ drawRoll(D.piano,8.6,st.play,st.sheetReady);hlStaff(tab==='page'?st.play:null);
+ $('playic').innerHTML=st.play!=null?'<rect x="6" y="4" width="4" height="16" fill="#fff"/><rect x="14" y="4" width="4" height="16" fill="#fff"/>':'<path d="M7 4l13 8-13 8z" fill="#fff"/>';
+ const ex=st.exp||0;$('exp').style.display=ex>0?'block':'none';$('exp').style.transform=`translateY(${(1-ease(ex))*260}px)`;
+ const tp=$('tap');if(st.tap){const [x,y,p]=st.tap;tp.style.display='block';tp.style.left=x+'px';tp.style.top=y+'px';tp.style.opacity=p<.3?p/.3:1-(p-.3)/.7;tp.style.transform=`scale(${.6+p*.7})`}else tp.style.display='none';
+}
+const TAPS={mic:[196.5,775],stop:[196.5,766],page:[294,186],play:[110,795],share:[173,795],newtake:[180,322]};
+function camera(x,y,s){$('cam').style.transform=`translate(${x}px,${y}px) scale(${s})`}
+// captions
+function caps(list){$('caps').innerHTML=list.map(c=>`<div class="cap" style="left:${c.x}px;top:${c.y}px;width:${c.w}px;font-size:${c.size}px;text-align:${c.align||'left'};opacity:${c.o};transform:translateY(${c.dy||0}px) scale(${c.s||1});transform-origin:${c.origin||'left top'}">${c.html}</div>`).join('')}
+function popIn(t,a,b,extra={}){ // returns opacity/transform for caption shown [a,b)
+ if(t<a||t>=b)return null;const pi=prog(t,a,a+.28),po=prog(t,b-.18,b);return{o:clamp(pi*3)*(1-po),s:.85+.15*back(pi),dy:(1-ease(pi))*30,...extra}}
+// background roll streaks (hook)
+const bctx=(()=>{const c=$('bgroll');c.width=W;c.height=H;return c.getContext('2d')})();
+function bgRoll(t,alpha){bctx.clearRect(0,0,W,H);if(alpha<=0)return;const notes=D.piano.concat(D.guitar.map(n=>[n[0],n[1]+8.6,n[2]]));
+ for(const n of notes){const x=W-(t*700)+n[1]*260-200;const y=H*0.12+(84-n[0])*(H*0.76/40);bctx.fillStyle=`rgba(51,115,217,${alpha*0.28})`;bctx.beginPath();bctx.roundRect(x,y,Math.max(20,n[2]*260),H*0.016,6);bctx.fill()}}
+window.TIMELINE={};</script>
+<script>
+const chip=n=>`<span class="chip">${n}</span><br>`;
+function camFor(cx,cy,s,focus){ // focus=[lx,ly,sx,sy]: put logical point at screen point
+ if(focus){const [lx,ly,sx,sy]=focus;return [sx-s*(lx-196.5),sy-s*(ly-426),s]}return [cx,cy,s]}
+function lerpCam(a,b,p){p=ease(clamp(p));return a.map((v,i)=>v+(b[i]-v)*p)}
+function tapAt(name,t,t0){const p=prog(t,t0,t0+.45);return(t>=t0&&t<t0+.45)?[...TAPS[name],p]:null}
+
+function landing(t){
+ const HOME=[1400,540,1.06], OFF=[2400,540,1.06];
+ const ROLLZ=camFor(0,0,1.5,[196.5,300,1340,560]);
+ const STAFFZ=camFor(0,0,2.15,[196.5,322,1290,560]);
+ const ROLLD=camFor(0,0,1.45,[196.5,350,1320,560]);
+ let st={screen:'list'},cam=HOME,cp=[],bga=0;
+ const C=(html,a,b,opt={})=>{const p=popIn(t,a,b);if(p)cp.push({x:120,y:opt.y??330,w:opt.w??900,size:opt.size??96,html,...p,...opt})};
+ if(t<2.55){bga=1-prog(t,2.2,2.55);cam=OFF;
+   const p1=popIn(t,0,2.55),p2=popIn(t,0.85,2.55);
+   if(p1)cp.push({x:0,y:300,w:W,size:170,align:'center',origin:'center',html:'Play anything.',...p1});
+   if(p2)cp.push({x:0,y:520,w:W,size:170,align:'center',origin:'center',html:'<span class="hl">See the notes.</span>',...p2});
+ }else if(t<4.6){cam=lerpCam(OFF,HOME,prog(t,2.55,3.05));
+   C('Turn what you hear<br>into sheet music.<span class="sub" style="font-size:40px">In seconds. Right on your iPhone.</span>',2.6,4.6,{y:300});
+ }else if(t<6.1){cam=lerpCam(HOME,[1400,470,1.18],prog(t,4.6,5.2));st.tap=tapAt('mic',t,5.25);
+   if(t>=5.65)st={trans:['list','listen',prog(t,5.65,6.05),'up']};
+   C(chip(1)+'Tap the mic.',4.65,6.1,{y:380,size:110});
+ }else if(t<15.0){const now=Math.max(0,t-6.2);st={screen:'listen',live:[D.piano,Math.min(now,8.6)]};
+   cam=t<7?lerpCam([1400,470,1.18],ROLLZ,prog(t,6.1,7)):ROLLZ;
+   if(t>14.55)st.tap=tapAt('stop',t,14.55),cam=lerpCam(ROLLZ,HOME,prog(t,14.4,14.9));
+   C(chip(2)+'Play it.<span class="sub" style="font-size:40px">A riff, a melody, an idea.</span>',6.1,9.9,{y:340,size:120,w:700});
+   C('Watch every note<br>appear <span class="hl">live.</span>',9.9,15.0,{y:360,size:100,w:700});
+ }else if(t<16.6){st=t<15.6?{trans:['listen','detail',prog(t,15.1,15.55)]}:{screen:'detail',tab:'roll'};cam=HOME;
+   C(chip(3)+'Stop.<br>Your take is saved.',15.05,16.6,{y:360,size:100});
+ }else if(t<19.7){st={screen:'detail',tab:t<16.9?'roll':'page',analyzing:t>=16.9&&t<17.45,sheetReady:t>=17.45};st.tap=tapAt('page',t,16.6);
+   cam=t<17.5?HOME:lerpCam(HOME,STAFFZ,prog(t,17.5,18.1));
+   C('Sheet music,<br>when you want it.<span class="sub" style="font-size:38px">Tempo and key, worked out<br>from the whole take.</span>',16.65,19.7,{y:300,size:94,w:640});
+ }else if(t<26.5){const play=t>=20.0?Math.min(t-20.0,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};
+   st.tap=tapAt('play',t,19.7);
+   cam=t<20.0?lerpCam(STAFFZ,HOME,prog(t,19.7,19.95)):(t<20.3?HOME:lerpCam(HOME,STAFFZ,prog(t,20.3,20.8)));
+   C(chip(4)+'Hear it back.<span class="sub" style="font-size:40px">Every note lights up<br>as it plays.</span>',19.75,26.5,{y:320,size:104,w:640});
+ }else if(t<30.0){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,26.85,27.25)};st.tap=tapAt('share',t,26.55);
+   cam=t<26.8?lerpCam(STAFFZ,HOME,prog(t,26.5,26.8)):lerpCam(HOME,camFor(0,0,1.45,[196.5,740,1330,600]),prog(t,27.3,27.9));
+   C(chip(5)+'Share it.<span class="sub" style="font-size:42px">PDF, MIDI, MusicXML.</span>',26.55,30.0,{y:340,size:110});
+ }else if(t<34.0){const now=Math.max(0,t-30.25);st={screen:'listen',live:[D.guitar,Math.min(now,4.6)]};cam=ROLLZ;
+   C('Guitar? <span class="hl">Yep.</span><span class="sub" style="font-size:42px">Pick it, strum it, see it.</span>',30.05,34.0,{y:360,size:120,w:700});
+ }else if(t<40.4){
+   if(t<35.6){st={screen:'detail',tab:'page',sheetReady:true,play:2.6};cam=STAFFZ;C('Learn songs<br><span class="hl">by ear.</span>',34.0,35.6,{y:340,size:120,w:700})}
+   else if(t<37.2){st={screen:'list',newTake:1-prog(t,36.6,37.2)*0.5};cam=camFor(0,0,1.6,[196.5,330,1330,540]);C('Catch ideas<br>before they’re <span class="hl">gone.</span>',35.6,37.2,{y:340,size:110,w:700})}
+   else if(t<38.8){st={screen:'detail',tab:'roll',play:3+(t-37.2)};cam=ROLLD;C('Practice it,<br><span class="hl">note by note.</span>',37.2,38.8,{y:340,size:120,w:700})}
+   else{st={screen:'listen',live:[D.piano,8.6]};cam=ROLLZ;C('Noisy room?<span class="sub" style="font-size:44px">A built-in noise gate keeps<br>the hum out of your notes.</span>',38.8,40.4,{y:330,size:120,w:700})}
+ }else{const p=prog(t,40.4,41.0);st={screen:'list',newTake:.5};cam=lerpCam(ROLLZ,[1440,540,1.0],p);bga=0.5*p;
+   const q=popIn(t,40.5,99);if(q)cp.push({x:120,y:250,w:900,size:104,html:`<img src="../../../Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" style="width:150px;height:150px;border-radius:34px;box-shadow:0 14px 30px rgba(80,30,10,.3);display:block;margin-bottom:34px">AI Music Radar<span class="sub" style="font-size:46px;color:#2a1610">Play it. See it.</span>`,...q});
+   const r=popIn(t,41.2,99);if(r)cp.push({x:120,y:735,w:900,size:40,html:`<span style="display:inline-block;background:#0c6b6b;color:#fff;border-radius:40px;padding:16px 40px;font-size:44px;letter-spacing:-.5px">Try it free</span><span class="sub" style="font-size:34px;margin-top:22px">Coming soon on the App Store<br>grepawk.com/music-radar</span>`,...r});
+ }
+ return {st,cam,cp,bga};
+}
+
+function tiktok(t){
+ const HOME=[500,1065,1.22];
+ const ROLLZ=camFor(0,0,1.75,[196.5,300,500,1160]);
+ const STAFFZ=camFor(0,0,2.25,[196.5,322,490,1170]);
+ let st={screen:'list'},cam=HOME,cp=[],bga=0;
+ const C=(html,a,b,opt={})=>{const p=popIn(t,a,b);if(p)cp.push({x:70,y:opt.y??170,w:780,size:opt.size??84,align:'center',origin:'center top',html:`<span class="tt">${html}</span>`,...p,...opt})};
+ const first=t<0.05?{o:1,s:1,dy:0}:null;
+ if(t<2.5){st.tap=tapAt('mic',t,1.85);if(t>=2.15)st={trans:['list','listen',prog(t,2.15,2.5),'up']};
+   const p=first||popIn(t,0,2.5);if(p)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:'<span class="tt">POV: you hear a song and want the <span class="hl">sheet music</span></span>',...p,o:1,s:Math.max(p.s,.97),dy:0});
+ }else if(t<11.2){const now=Math.max(0,t-2.6);st={screen:'listen',live:[D.piano,Math.min(now,8.6)]};
+   cam=t<3.5?lerpCam(HOME,ROLLZ,prog(t,2.6,3.4)):ROLLZ;
+   if(t>10.75){st.tap=tapAt('stop',t,10.75);cam=lerpCam(ROLLZ,HOME,prog(t,10.6,11.0))}
+   C('so you just…<br><span class="hl">play&nbsp;it</span>&nbsp;🎹',2.5,5.8,{size:84});
+   C('and the notes show up <span class="hl">LIVE</span> 👀',5.8,11.2,{size:82});
+ }else if(t<14.0){st=t<11.7?{trans:['listen','detail',prog(t,11.25,11.65)]}:{screen:'detail',tab:t<12.1?'roll':'page',analyzing:t>=12.1&&t<12.55,sheetReady:t>=12.55};
+   st.tap=tapAt('page',t,11.85);cam=t<12.6?HOME:lerpCam(HOME,STAFFZ,prog(t,12.6,13.1));
+   C('tap Page →<br><span class="hl">real sheet music</span> ✨',11.2,14.0,{size:82});
+ }else if(t<19.6){const play=t>=14.35?Math.min(t-14.35,8.6):null;st={screen:'detail',tab:'page',sheetReady:true,play};st.tap=tapAt('play',t,14.0);
+   cam=t<14.3?lerpCam(STAFFZ,HOME,prog(t,14.0,14.25)):(t<14.6?HOME:lerpCam(HOME,STAFFZ,prog(t,14.6,15.0)));
+   C('it even plays<br>it <span class="hl">back</span>&nbsp;🔊',14.0,19.6,{size:84});
+ }else if(t<21.7){st={screen:'detail',tab:'page',sheetReady:true,exp:prog(t,19.95,20.3)};st.tap=tapAt('share',t,19.65);
+   cam=t<19.9?lerpCam(STAFFZ,HOME,prog(t,19.6,19.9)):lerpCam(HOME,camFor(0,0,1.6,[196.5,740,500,1250]),prog(t,20.3,20.8));
+   C('export <span class="hl">PDF · MIDI</span><br>MusicXML',19.65,21.7,{size:84});
+ }else{st=t<22.1?{trans:['detail','list',prog(t,21.7,22.05)]}:{screen:'list',newTake:1};cam=HOME;
+   const fade=prog(t,23.6,24.0);
+   const q=popIn(t,21.75,99);if(q)q.o*=(1-fade);
+   if(q)cp.push({x:70,y:120,w:780,size:88,align:'center',origin:'center top',html:`<img src="../../../Sources/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png" style="width:120px;height:120px;border-radius:28px;display:block;margin:0 auto 18px;box-shadow:0 10px 24px rgba(80,30,10,.3)">AI Music Radar<span class="sub" style="font-size:40px;color:#2a1610">try it free · coming soon<br>on the App Store</span>`,...q});
+   const z=t>=23.65?{o:fade,s:1,dy:0}:null;if(z)cp.push({x:70,y:170,w:780,size:80,align:'center',origin:'center top',html:'<span class="tt">POV: you hear a song and want the <span class="hl">sheet music</span></span>',...z});
+ }
+ return {st,cam,cp,bga};
+}
+window.renderAt=function(t){const r=(MODE==='tiktok'?tiktok:landing)(t);phone(r.st);camera(...r.cam);caps(r.cp);bgRoll(t,r.bga)};
+window.DUR=MODE==='tiktok'?24.0:45.0;
+renderAt(0);
+</script></body></html>

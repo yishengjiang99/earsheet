@@ -1,0 +1,10 @@
+X:1
+M:4/4
+L:1/16
+Q:1/4=120
+%%score {RH LH}
+V:RH clef=treble
+V:LH clef=bass
+K:Am
+[V:RH] E4 G2 A2 c4 B2 A2 | G4 E2 G2 A8 | A4 c2 d2 e4 d2 c2 | d4 B2 G2 c6-c z |
+[V:LH] z16 | z16 | z16 | z16 |

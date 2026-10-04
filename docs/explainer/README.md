@@ -1,3 +1,18 @@
+# AI Music Radar — promo videos (current)
+
+- [`ai-music-radar-landing.mp4`](ai-music-radar-landing.mp4): landing-page video, 1920×1080, 45 s, poster
+  [`ai-music-radar-landing-poster.jpg`](ai-music-radar-landing-poster.jpg). Marketing-first: hook ("Play anything.
+  See the notes."), then tap the mic, play, watch the live piano roll, stop, open Page for sheet music, play it back with
+  highlighted notes, export (PDF / MIDI / MusicXML), guitar, benefit beats, and a CTA ("Try it free · Coming soon on the App Store").
+- [`ai-music-radar-tiktok.mp4`](ai-music-radar-tiktok.mp4): TikTok / Reels / Shorts, 1080×1920, 24 s, poster
+  [`ai-music-radar-tiktok-poster.jpg`](ai-music-radar-tiktok-poster.jpg). "POV: you hear a song and want the sheet
+  music", then the same demo, ending on the list screen so it loops. Captions are burned in, kept out of the bottom 20 % and right 15 %.
+
+No voiceover. Captions carry the message with the sound off. The music is an original generated bed. Build sources are in
+[`promo/`](promo/README.md).
+
+---
+
 # AI Music Radar — explainer video & landing page
 
 [`ai-music-radar-explainer.mp4`](ai-music-radar-explainer.mp4) (~4:47, 1920×1080, H.264/AAC) is the
