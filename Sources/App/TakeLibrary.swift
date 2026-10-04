@@ -237,7 +237,8 @@ final class TakeLibrary: ObservableObject {
     }
 
     /// URL of a take's session-audio WAV in the library's Application Support dir.
-    static func audioURL(fileName: String) -> URL {
+    /// Nonisolated: touches only FileManager, no actor state.
+    nonisolated static func audioURL(fileName: String) -> URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(HearSheet.bundleIdentifier, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
