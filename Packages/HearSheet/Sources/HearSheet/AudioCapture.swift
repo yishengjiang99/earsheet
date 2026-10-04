@@ -212,6 +212,13 @@ public final class AudioRecorder {
         return samples.count
     }
 
+    /// Copy of the samples recorded so far (the same 22050 Hz mono float32
+    /// the model hears, post input conditioning). Safe to call while recording.
+    public var currentSamples: [Float] {
+        lock.lock(); defer { lock.unlock() }
+        return samples
+    }
+
     public var recordedSeconds: Double {
         Double(recordedSampleCount) / Self.targetSampleRate
     }
