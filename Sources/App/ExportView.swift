@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import SwiftUI
 import HearSheet
+import UIKit
 
 /// Export format picker. Free tier: MP3 + photo free, PDF first 30s,
 /// MIDI + MusicXML locked behind Pro.
@@ -34,6 +35,22 @@ struct ExportView: View {
                               subtitle: "Save page image", locked: false) {
                         exportPhoto()
                     }
+                }
+                Section {
+                    if take.audioFileName != nil {
+                        ExportRow(icon: "mic", title: "Mic audio",
+                                  subtitle: "What the mic heard (WAV)", locked: false) {
+                            exportSessionAudio()
+                        }
+                    }
+                    ExportRow(icon: "list.bullet", title: "Note events",
+                              subtitle: "Transcribed array (JSON)", locked: false) {
+                        exportNoteEvents()
+                    }
+                } header: {
+                    Text("Session recording")
+                } footer: {
+                    Text("Debug export: the mic audio as the model heard it, plus the transcribed note array.")
                 }
                 Section {
                     ExportRow(icon: "music.note", title: "MIDI",
@@ -141,6 +158,29 @@ struct ExportView: View {
             return
         }
         shareFile(name: "\(baseName).png", data: png)
+    }
+
+    // MARK: - Session recording (debug)
+
+    private func exportSessionAudio() {
+        guard let name = take.audioFileName else {
+            notice = "This take has no session audio."
+            return
+        }
+        let url = TakeLibrary.audioURL(fileName: name)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            notice = "The session audio file is missing."
+            return
+        }
+        shareItems = [url]
+        showShare = true
+    }
+
+    private func exportNoteEvents() {
+        let json = SessionDebugExport.notesJSONString(notes: take.noteEvents)
+        UIPasteboard.general.string = json
+        shareFile(name: "\(baseName)-notes.json", data: Data(json.utf8))
+        notice = "Note array copied to the clipboard — paste it into chat."
     }
 }
 

@@ -35,4 +35,17 @@ enum SessionDebugExport {
         try Data(notesJSONString(notes: notes).utf8).write(to: url, options: .atomic)
         return url
     }
+
+    /// Persists session PCM as a WAV in the library's Application Support dir so the
+    /// take's Export screen can share it later. Returns the filename, or nil on failure.
+    static func persistSessionAudio(_ samples: [Float]) -> String? {
+        let name = UUID().uuidString + ".wav"
+        let wav = WavWriter.data(samples: samples, sampleRate: Int(AudioRecorder.targetSampleRate))
+        do {
+            try wav.write(to: TakeLibrary.audioURL(fileName: name), options: .atomic)
+            return name
+        } catch {
+            return nil
+        }
+    }
 }
