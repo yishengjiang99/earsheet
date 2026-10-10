@@ -5,9 +5,11 @@ import StoreKit
 /// StoreKit 2 manager for AI Music Radar Pro.
 ///
 /// Products (created in App Store Connect 2026-10-03, group "AI Music Radar Pro"):
-/// - com.ragnus.pnge.pro.monthly  — $4.99/mo, 7-day trial
-/// - com.ragnus.pnge.pro.yearly   — $29.99/yr, 7-day trial
-/// - com.ragnus.pnge.lifetime     — $49.99 once, non-consumable
+/// - com.ragnus.pnge.pro.monthly  — $4.99/mo (USA), 1-week free trial, level 2
+/// - com.ragnus.pnge.pro.yearly   — $29.99/yr (USA), 1-week free trial, level 1
+/// - com.ragnus.pnge.lifetime     — $49.99 once (USA), non-consumable
+/// Family Sharing is off for all three (matches ASC and Products.storekit). The app never hardcodes
+/// these prices: the paywall reads Product.price / displayPrice / priceFormatStyle.
 ///
 /// Entitlement = active Pro subscription OR owned Lifetime.
 /// The entitlement is cached locally and refreshed on launch, on
@@ -31,6 +33,10 @@ final class ProStore: ObservableObject {
     @Published private(set) var products: [Product] = []
     @Published private(set) var isPro: Bool = false
     @Published private(set) var isLoadingProducts = false
+    /// Shown on the paywall (with a Try Again button) when prices could not be loaded or came back empty.
+    @Published private(set) var productsError: String?
+    /// Product.SubscriptionInfo.isEligibleForIntroOffer per subscription product id.
+    @Published private(set) var introEligibility: [String: Bool] = [:]
     @Published var purchaseError: String?
 
     private var updatesTask: Task<Void, Never>?
@@ -49,20 +55,47 @@ final class ProStore: ObservableObject {
 
     // MARK: - Products
 
-    func loadProducts() async {
-        guard products.isEmpty, !isLoadingProducts else { return }
+    /// Loads the three products. `force` reloads even when products are already loaded (Try Again).
+    func loadProducts(force: Bool = false) async {
+        guard force || products.isEmpty, !isLoadingProducts else { return }
         isLoadingProducts = true
+        productsError = nil
         defer { isLoadingProducts = false }
         do {
             let loaded = try await Product.products(for: Self.productIDs)
-            // Yearly first, then monthly, then lifetime.
-            let order = [Self.yearlyID, Self.monthlyID, Self.lifetimeID]
-            products = loaded.sorted {
-                (order.firstIndex(of: $0.id) ?? 99) < (order.firstIndex(of: $1.id) ?? 99)
+            products = Self.sortedForPaywall(loaded)
+            var eligibility: [String: Bool] = [:]
+            for product in products {
+                if let sub = product.subscription {
+                    eligibility[product.id] = await sub.isEligibleForIntroOffer
+                }
+            }
+            introEligibility = eligibility
+            if products.isEmpty {
+                productsError = "Prices aren't available right now. Check your connection and try again."
             }
         } catch {
-            purchaseError = "Could not load prices: \(error.localizedDescription)"
+            productsError = "Couldn't load prices: \(error.localizedDescription)"
         }
+    }
+
+    /// Yearly first, then monthly, then lifetime; unknown ids last.
+    static func sortedForPaywall(_ loaded: [Product]) -> [Product] {
+        loaded.sorted { paywallRank($0.id) < paywallRank($1.id) }
+    }
+
+    static func paywallRank(_ id: String) -> Int {
+        [yearlyID, monthlyID, lifetimeID].firstIndex(of: id) ?? 99
+    }
+
+    /// The free trial this account can get for `product`, or nil (not eligible, no intro offer, or not a free trial).
+    func eligibleTrial(for product: Product) -> PaywallPricing.Trial? {
+        let offer = product.subscription?.introductoryOffer
+        return PaywallPricing.eligibleTrial(
+            isEligible: introEligibility[product.id] ?? false,
+            offerIsFreeTrial: offer?.paymentMode == .freeTrial,
+            offerPeriod: offer.map { PaywallPricing.Period($0.period) }
+        )
     }
 
     func product(for id: String) -> Product? {

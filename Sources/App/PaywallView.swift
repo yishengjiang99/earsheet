@@ -3,14 +3,19 @@ import SwiftUI
 import StoreKit
 
 /// Full paywall: plan picker (yearly preselected), benefits, sticky CTA.
-/// All prices come from Product.displayPrice (localized), never hard-coded.
+/// All prices come from StoreKit (Product.displayPrice / price / priceFormatStyle), never hard-coded.
+/// Trial copy appears only when the account is eligible for the product's free-trial intro offer.
+/// Guideline 3.1.2: localized price + period, auto-renew terms, Restore, Terms (Apple standard EULA), Privacy.
 struct PaywallView: View {
     @ObservedObject var store: ProStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedID: String = ProStore.yearlyID
     @State private var isPurchasing = false
-    @State private var showTrialStarted = false
+    @State private var isRestoring = false
+
+    static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    static let privacyURL = URL(string: "https://grepawk.com/music-radar/privacy")!
 
     var body: some View {
         NavigationStack {
@@ -30,7 +35,7 @@ struct PaywallView: View {
 
                 // Sticky CTA footer.
                 VStack(spacing: 10) {
-                    Button(action: buySelected) {
+                    Button(action: ctaAction) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Ink.teal)
@@ -45,12 +50,18 @@ struct PaywallView: View {
                             }
                         }
                     }
-                    .disabled(isPurchasing || selectedProduct == nil)
-                    .accessibilityLabel("Subscribe to \(selectedProduct?.displayName ?? "Pro")")
+                    .disabled(isPurchasing || isRestoring || store.isLoadingProducts)
+                    .accessibilityLabel(ctaTitle)
 
-                    Button("Restore Purchases") {
-                        Task { await store.restore() }
+                    Button(isRestoring ? "Restoring…" : "Restore Purchases") {
+                        isRestoring = true
+                        Task {
+                            let restored = await store.restore()
+                            isRestoring = false
+                            if restored { dismiss() }
+                        }
                     }
+                    .disabled(isRestoring || isPurchasing)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
@@ -72,7 +83,9 @@ struct PaywallView: View {
             .task {
                 Telemetry.shared.track(.paywallView)
                 await store.loadProducts()
+                selectDefaultPlan()
             }
+            .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
             .alert("AI Music Radar", isPresented: Binding(
                 get: { store.purchaseError != nil },
                 set: { if !$0 { store.purchaseError = nil } }
@@ -106,25 +119,63 @@ struct PaywallView: View {
                 PlanRow(
                     product: product,
                     isSelected: product.id == selectedID,
-                    badge: badge(for: product)
+                    badge: badge(for: product),
+                    subtitle: subtitle(for: product),
+                    periodText: product.subscription.map { "per " + PaywallPricing.Period($0.subscriptionPeriod).perText }
                 ) {
                     selectedID = product.id
                 }
             }
             if store.products.isEmpty {
-                ProgressView("Loading prices…")
+                if store.isLoadingProducts || store.productsError == nil {
+                    ProgressView("Loading prices…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                        Text(store.productsError ?? "Prices aren't available right now.")
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                        Button("Try Again") { retryLoad() }
+                            .buttonStyle(.bordered)
+                    }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                    .padding(.vertical, 16)
+                }
             }
         }
     }
 
+    private var monthlyProduct: Product? { store.product(for: ProStore.monthlyID) }
+
+    /// Formats a StoreKit Decimal amount in the product's own currency/locale.
+    private func format(_ amount: Decimal, like product: Product) -> String {
+        amount.formatted(product.priceFormatStyle)
+    }
+
+    /// "Save N%" for multi-month plans, computed from StoreKit prices against the monthly plan.
     private func badge(for product: Product) -> String? {
-        switch product.id {
-        case ProStore.yearlyID: return "Save 50%"
-        case ProStore.lifetimeID: return "Launch price"
-        default: return nil
+        guard let sub = product.subscription, let monthly = monthlyProduct, monthly.id != product.id,
+              monthly.priceFormatStyle.currencyCode == product.priceFormatStyle.currencyCode,
+              let pct = PaywallPricing.savingsPercent(price: product.price,
+                                                      period: PaywallPricing.Period(sub.subscriptionPeriod),
+                                                      monthlyPrice: monthly.price)
+        else { return nil }
+        return "Save \(pct)%"
+    }
+
+    private func subtitle(for product: Product) -> String {
+        guard let sub = product.subscription else {
+            return PaywallPricing.planSubtitle(isSubscription: false, period: nil, monthlyEquivalentText: nil, trial: nil)
         }
+        let period = PaywallPricing.Period(sub.subscriptionPeriod)
+        let perMonth = PaywallPricing.monthlyEquivalent(price: product.price, period: period).map { format($0, like: product) }
+        return PaywallPricing.planSubtitle(isSubscription: true, period: period,
+                                           monthlyEquivalentText: perMonth, trial: store.eligibleTrial(for: product))
     }
 
     private var selectedProduct: Product? {
@@ -132,12 +183,45 @@ struct PaywallView: View {
     }
 
     private var ctaTitle: String {
-        guard let p = selectedProduct else { return "Continue" }
-        if p.type == .nonConsumable {
-            return "Buy for \(p.displayPrice)"
+        guard let p = selectedProduct else {
+            if store.isLoadingProducts { return "Loading prices…" }
+            return store.products.isEmpty ? "Try Again" : "Choose a plan"
         }
-        // Both subscriptions offer a 7-day free trial (introductory offer in ASC).
-        return "Try 7 days free, then \(p.displayPrice)"
+        return PaywallPricing.ctaTitle(isSubscription: p.subscription != nil, displayPrice: p.displayPrice,
+                                       period: p.subscription.map { PaywallPricing.Period($0.subscriptionPeriod) },
+                                       trial: store.eligibleTrial(for: p))
+    }
+
+    private var disclosureText: String {
+        guard let p = selectedProduct else {
+            return "Pro is available as an auto-renewing yearly or monthly subscription, or a one-time Lifetime purchase. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the current period."
+        }
+        return PaywallPricing.disclosure(isSubscription: p.subscription != nil, displayName: p.displayName,
+                                         displayPrice: p.displayPrice,
+                                         period: p.subscription.map { PaywallPricing.Period($0.subscriptionPeriod) },
+                                         trial: store.eligibleTrial(for: p))
+    }
+
+    private func selectDefaultPlan() {
+        if store.product(for: selectedID) == nil, let first = store.products.first {
+            selectedID = first.id
+        }
+    }
+
+    private func retryLoad() {
+        Task {
+            await store.loadProducts(force: true)
+            selectDefaultPlan()
+        }
+    }
+
+    /// CTA buys the selected plan; with no products loaded it retries instead of doing nothing.
+    private func ctaAction() {
+        if selectedProduct == nil {
+            retryLoad()
+        } else {
+            buySelected()
+        }
     }
 
     private func buySelected() {
@@ -147,7 +231,6 @@ struct PaywallView: View {
             let becamePro = await store.purchase(product)
             isPurchasing = false
             if becamePro {
-                showTrialStarted = true
                 dismiss()
             }
         }
@@ -178,13 +261,17 @@ struct PaywallView: View {
     }
 
     private var legalLinks: some View {
-        VStack(spacing: 8) {
-            Link("Privacy Policy", destination: URL(string: "https://grepawk.com/music-radar/privacy")!)
-            Link("Terms of Use", destination: URL(string: "https://grepawk.com/music-radar/terms")!)
-            Text("Payment is charged to your Apple ID at confirmation. Subscriptions auto-renew unless cancelled at least 24 hours before the period ends.")
+        VStack(spacing: 10) {
+            Text(disclosureText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 16) {
+                Link("Terms of Use (EULA)", destination: Self.termsURL)
+                Link("Privacy Policy", destination: Self.privacyURL)
+            }
+            .font(.footnote)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
@@ -197,6 +284,8 @@ private struct PlanRow: View {
     let product: Product
     let isSelected: Bool
     let badge: String?
+    let subtitle: String
+    let periodText: String?
     let onTap: () -> Void
 
     var body: some View {
@@ -217,13 +306,20 @@ private struct PlanRow: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    Text(planSubtitle)
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(product.displayPrice)
-                    .font(.headline)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(product.displayPrice)
+                        .font(.headline)
+                    if let periodText {
+                        Text(periodText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Ink.teal : .secondary)
                     .font(.title3)
@@ -235,20 +331,7 @@ private struct PlanRow: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(product.displayName), \(product.displayPrice)")
-    }
-
-    private var planSubtitle: String {
-        switch product.id {
-        case ProStore.yearlyID:
-            return "≈ $2.50/month, billed yearly · 7 days free"
-        case ProStore.monthlyID:
-            return "Billed monthly · 7 days free, cancel anytime"
-        case ProStore.lifetimeID:
-            return "One payment, no renewal"
-        default:
-            return product.description
-        }
+        .accessibilityLabel("\(product.displayName), \(product.displayPrice) \(periodText ?? ""), \(subtitle)")
     }
 }
 

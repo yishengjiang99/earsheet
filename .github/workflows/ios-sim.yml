@@ -86,6 +86,8 @@ jobs:
             -project EarSheet.xcodeproj \
             -scheme EarSheet \
             -only-testing:EarSheetTests/SmokeTests \
+            -only-testing:EarSheetTests/ProStoreTests \
+            -only-testing:EarSheetTests/PaywallPricingTests \
             -only-testing:EarSheetTests/ImportTranscriptionTests \
             -only-testing:EarSheetTests/StreamingExportTests \
             -only-testing:EarSheetTests/APIClientTests \
