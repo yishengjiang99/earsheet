@@ -3,8 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Music Radar — Play it, see it.</title>
-<meta name="description" content="AI Music Radar turns what you hear into sheet music, live and entirely on your iPhone. On-device transcription. No upload, no account.">
+<title>AI Music Radar: Turn What You Hear into Sheet Music on iPhone</title>
+<meta name="description" content="AI Music Radar listens as you play, sing or hum and writes sheet music live on your iPhone: engraved score, piano roll, MIDI, MusicXML and PDF export.">
+<link rel="canonical" href="https://music.grepawk.com/">
+<meta name="theme-color" content="#0e1216">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AI Music Radar">
+<meta property="og:url" content="https://music.grepawk.com/">
+<meta property="og:title" content="AI Music Radar: Turn What You Hear into Sheet Music">
+<meta property="og:description" content="AI Music Radar listens as you play, sing or hum and writes sheet music live on your iPhone: engraved score, piano roll, MIDI, MusicXML and PDF export.">
+<meta property="og:image" content="https://music.grepawk.com/og-1200x630.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="AI Music Radar on iPhone showing an engraved two-staff score transcribed from audio">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AI Music Radar: Turn What You Hear into Sheet Music">
+<meta name="twitter:description" content="AI Music Radar listens as you play, sing or hum and writes sheet music live on your iPhone: engraved score, piano roll, MIDI, MusicXML and PDF export.">
+<meta name="twitter:image" content="https://music.grepawk.com/og-1200x630.jpg">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AI Music Radar","alternateName":"AI Music Radar: Live Audio to Sheet Music","applicationCategory":"MusicApplication","operatingSystem":"iOS 17 or later, iPadOS 17 or later","url":"https://music.grepawk.com/","description":"AI Music Radar listens as you play, sing or hum and writes sheet music live on your iPhone: engraved score, piano roll, MIDI, MusicXML and PDF export.","image":"https://music.grepawk.com/og-1200x630.jpg","screenshot":["https://music.grepawk.com/screenshots/iphone-69-01-hear-it.png","https://music.grepawk.com/screenshots/iphone-69-02-sheet-music.png"],"publisher":{"@type":"Organization","name":"GrepAwk LLC","url":"https://grepawk.com/"},"offers":[{"@type":"Offer","name":"Free","price":"0","priceCurrency":"USD"},{"@type":"Offer","name":"Pro Monthly","price":"4.99","priceCurrency":"USD"},{"@type":"Offer","name":"Pro Yearly","price":"29.99","priceCurrency":"USD"},{"@type":"Offer","name":"Lifetime Pro","price":"49.99","priceCurrency":"USD"}]}</script>
 <style>
 :root{
   --ink:#0e1216; --ink2:#141a20; --card:#182027; --line:#2a343d;
@@ -17,11 +36,13 @@ body{background:radial-gradient(1200px 700px at 50% 0%, #16202a 0%, var(--ink) 7
 .wrap{max-width:1120px;margin:0 auto;padding:0 28px}
 header.top{display:flex;justify-content:space-between;align-items:center;padding:26px 0}
 .brand{font-weight:800;letter-spacing:3px;color:var(--teal);font-size:18px}
-nav a{color:var(--muted);text-decoration:none;margin-left:26px;font-size:16px}
+nav a{color:var(--muted);text-decoration:none;margin-left:22px;font-size:16px;display:inline-block;padding:12px 0}
+.sub a{color:var(--teal)}
+@media(max-width:600px){header.top{flex-direction:column;gap:8px}header.top nav{text-align:center}nav a{margin:0 10px}}
 nav a:hover{color:var(--paper)}
 .hero{text-align:center;padding:60px 0 40px}
 .kicker{font-size:14px;letter-spacing:5px;text-transform:uppercase;color:var(--teal);font-weight:600;margin-bottom:20px}
-h1{font-size:64px;line-height:1.08;letter-spacing:-1px;margin-bottom:18px}
+h1{font-size:56px;line-height:1.08;letter-spacing:-1px;margin-bottom:18px}
 h1 .teal{color:var(--teal)}
 .lede{font-size:22px;color:var(--muted);max-width:760px;margin:0 auto 34px}
 .cta-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:44px}
@@ -44,7 +65,7 @@ h2{font-size:40px;margin-bottom:14px;letter-spacing:-.5px}
 /* screenshots */
 .shots{display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
 .shot{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
-.shot img{width:100%;display:block;aspect-ratio:9/19.2;object-fit:cover;object-position:top}
+.shot img{width:100%;height:auto;display:block;aspect-ratio:9/19.2;object-fit:cover;object-position:top}
 .shot .cap{padding:16px;font-size:15px;font-weight:600}
 .shot .cap span{display:block;font-weight:400;color:var(--muted);font-size:13px;margin-top:4px}
 /* pipeline */
@@ -76,8 +97,12 @@ footer{border-top:1px solid var(--line);padding:40px 0 60px;color:var(--muted);f
 footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:18px}
 footer a{color:var(--muted);text-decoration:none;margin-right:22px}
 footer a:hover{color:var(--teal)}
+footer nav a{margin-left:0}
+.more{margin-top:14px}
+.more h2{font-size:14px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;font-family:inherit}
+.soon{display:inline-block;margin-top:6px;font-size:15px;color:var(--teal)}
 @media(max-width:900px){
-  h1{font-size:44px}.proofs,.prices{grid-template-columns:1fr}
+  h1{font-size:38px}.proofs,.prices{grid-template-columns:1fr}
   .shots{grid-template-columns:repeat(2,1fr)}
 }
 </style>
@@ -85,16 +110,16 @@ footer a:hover{color:var(--teal)}
 <body>
 <div class="wrap">
   <header class="top">
-    <div class="brand">AI MUSIC RADAR</div>
-    <nav><a href="#video">Video</a><a href="#screenshots">Screenshots</a><a href="#how">How it works</a><a href="#pricing">Pricing</a></nav>
+    <a class="brand" href="./" style="text-decoration:none">AI MUSIC RADAR</a>
+    <nav aria-label="Page sections"><a href="#screenshots">Screenshots</a><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="https://grepawk.com/music-hear/" data-track="web_demo_click">Web demo</a></nav>
   </header>
 
   <div class="hero">
-    <div class="kicker">On-device music transcription</div>
-    <h1 class="serif">Play it. <span class="teal">See it.</span></h1>
-    <p class="lede">AI Music Radar turns what you hear into sheet music — live and entirely on your iPhone. For musicians who learn and write by ear: notes appear while you play, then you get a real engraved score, a piano roll, and MIDI / MusicXML / PDF export.</p>
+    <div class="kicker">iPhone &amp; iPad app · coming soon to the App Store</div>
+    <h1 class="serif">Turn what you hear into <span class="teal">sheet music</span>, live on your iPhone</h1>
+    <p class="lede">Play it. See it. AI Music Radar listens as you play, sing or hum and writes the notes as you go, then gives you an engraved score, a piano roll with playback, and MIDI, MusicXML and PDF export. Transcription runs on your device.</p>
     <div class="cta-row">
-      <a class="btn primary" href="https://grepawk.com/music-hear/">Try the web demo — no install</a>
+      <a class="btn primary" href="https://grepawk.com/music-hear/" data-track="web_demo_click">Try the web demo, no install</a>
       <a class="btn ghost" href="#video">Watch how it works</a>
     </div>
   </div>
@@ -104,34 +129,34 @@ footer a:hover{color:var(--teal)}
       <source src="ai-music-radar-landing.mp4" type="video/mp4">
       Your browser can't play this video. <a href="ai-music-radar-landing.mp4">Download it here.</a>
     </video>
-    <p class="sub" style="text-align:center;margin-top:12px">On your phone? <a href="ai-music-radar-tiktok.mp4">Watch the 19-second vertical cut</a>.</p>
+    <p class="sub" style="text-align:center;margin-top:12px">On your phone? <a href="ai-music-radar-tiktok.mp4">Watch the 19-second vertical video</a>.</p>
   </div>
 
   <section>
-    <h2 class="serif">Why it's different</h2>
-    <p class="sub">Three things no competitor in the category puts together.</p>
+    <h2 class="serif">Live notes, on-device transcription, real notation</h2>
+    <p class="sub">Three things AI Music Radar puts together in one app.</p>
     <div class="proofs">
-      <div class="proof"><div class="n">01 · LIVE</div><h3>Notes while you play</h3><p>The web demo transcribes at about 0.7&nbsp;s latency. No competitor checked on iOS does real-time polyphonic transcription.</p></div>
-      <div class="proof"><div class="n">02 · ON-DEVICE</div><h3>Private by architecture</h3><p>The Core ML model (Spotify Basic Pitch) runs locally. It works offline with no login — your audio never leaves the phone, and no server outage can take it down.</p></div>
-      <div class="proof"><div class="n">03 · REAL OUTPUT</div><h3>Made for musicians</h3><p>An engraved staff, tempo / meter / key estimation, playback with note highlighting, and MIDI / MusicXML / PDF that opens in MuseScore, Dorico, Sibelius or Logic.</p></div>
+      <div class="proof"><div class="n">01 · LIVE</div><h3>Notes while you play</h3><p>Notes appear on the staff while you play, sing or hum. The model is polyphonic, so chords show up too. The web demo runs at about 0.7&nbsp;s latency.</p></div>
+      <div class="proof"><div class="n">02 · ON-DEVICE</div><h3>Private by architecture</h3><p>The Core ML model (Spotify Basic Pitch) runs on your iPhone. Transcription works offline, there is no sign-in, and your recordings are never uploaded.</p></div>
+      <div class="proof"><div class="n">03 · REAL OUTPUT</div><h3>Made for musicians</h3><p>An engraved staff with tempo, meter and key detection, playback with note highlighting, and MIDI, MusicXML and PDF export for MuseScore, Dorico, Sibelius, Finale, Logic or GarageBand.</p></div>
     </div>
   </section>
 
   <section id="screenshots">
-    <h2 class="serif">Screenshots</h2>
-    <p class="sub">From the App Store listing — the app as it runs on iPhone.</p>
+    <h2 class="serif">Screenshots: from live notes to an exported score</h2>
+    <p class="sub">From the App Store listing: the app as it runs on iPhone.</p>
     <div class="shots">
-      <div class="shot"><img src="../asc/screenshots/en-US/iphone-69-01-hear-it.png" alt="Hear it"><div class="cap">Play it. See the notes. Live.<span>Tap record — the score writes itself.</span></div></div>
-      <div class="shot"><img src="../asc/screenshots/en-US/iphone-69-02-sheet-music.png" alt="Sheet music"><div class="cap">Runs on your iPhone.<span>No upload, no account.</span></div></div>
-      <div class="shot"><img src="../asc/screenshots/en-US/iphone-69-03-playback.png" alt="Playback"><div class="cap">Engraved score, in key and in time.<span>Tempo, meter and key detected.</span></div></div>
-      <div class="shot"><img src="../asc/screenshots/en-US/iphone-69-04-piano-roll.png" alt="Piano roll"><div class="cap">Playback that follows every note.<span>Watch each note light up as it sounds.</span></div></div>
-      <div class="shot"><img src="../asc/screenshots/en-US/iphone-69-05-export.png" alt="Export"><div class="cap">Export MIDI, MusicXML and PDF.<span>Take it to your DAW or notation app.</span></div></div>
+      <div class="shot"><img src="screenshots/iphone-69-01-hear-it.webp" alt="Sheets library of recorded takes with a record button" width="440" height="956" loading="lazy" decoding="async"><div class="cap">Hear it. Then read it.<span>Record a take or import audio.</span></div></div>
+      <div class="shot"><img src="screenshots/iphone-69-02-sheet-music.webp" alt="Engraved two-staff score of a recorded take, with tempo, meter and key detected" width="440" height="956" loading="lazy" decoding="async"><div class="cap">Real sheet music in seconds.<span>Tempo, meter and key detected.</span></div></div>
+      <div class="shot"><img src="screenshots/iphone-69-03-playback.webp" alt="Score playback with the sounding notes highlighted" width="440" height="956" loading="lazy" decoding="async"><div class="cap">Every note lights up as it plays.<span>Play it back right on the page.</span></div></div>
+      <div class="shot"><img src="screenshots/iphone-69-04-piano-roll.webp" alt="Piano roll view of a take for checking pitch and rhythm" width="440" height="956" loading="lazy" decoding="async"><div class="cap">Check it on the piano roll.<span>Switch between Page and Piano roll.</span></div></div>
+      <div class="shot"><img src="screenshots/iphone-69-05-export.webp" alt="Export options: MIDI, MusicXML, PDF, MP3 and PNG photo" width="440" height="956" loading="lazy" decoding="async"><div class="cap">Export MIDI, MusicXML and PDF.<span>Plus MP3 and a PNG photo of the score.</span></div></div>
     </div>
   </section>
 
   <section id="how">
-    <h2 class="serif">How it works</h2>
-    <p class="sub">Mic to score, start to finish, on the Neural Engine.</p>
+    <h2 class="serif">How audio becomes sheet music</h2>
+    <p class="sub">Mic to score, start to finish, on the iPhone&rsquo;s Neural Engine.</p>
     <div class="pipe">
       <div class="pnode"><div class="t">Microphone</div><div class="s">live audio in</div></div>
       <div class="pnode"><div class="t">22 kHz mono</div><div class="s">capture</div></div>
@@ -140,11 +165,11 @@ footer a:hover{color:var(--teal)}
       <div class="pnode"><div class="t">Quantizer</div><div class="s">tempo · meter · key · 16th grid</div></div>
       <div class="pnode"><div class="t">Engraved score</div><div class="s">staff + MIDI</div></div>
     </div>
-    <div class="badge-row"><span class="badge">No audio ever leaves your phone</span><span class="badge">Works in airplane mode</span></div>
+    <div class="badge-row"><span class="badge">Your audio is never uploaded</span><span class="badge">Works in airplane mode</span></div>
     <div class="tune">
-      <h3 class="serif">Under active tuning</h3>
-      <p>The model is Spotify's Basic Pitch (ICASSP 2022 weights), pinned in <b>models.lock</b> with SHA-256 verification, shipped as versioned release assets — never in git.</p>
-      <p>Recent work tuned the <b>decoder</b>, not just the model — onset 0.7, frame 0.4, min note 5 frames — lifting note accuracy on real recordings with no retraining. Next: real <b>dynamics</b>. An audit found velocity was tracking model confidence, not loudness; a per-pitch energy calibration now beats both the old estimate and a trained neural head.</p>
+      <h3 class="serif">Transcription accuracy, under active tuning</h3>
+      <p>The model is Spotify's Basic Pitch (ICASSP 2022 weights), pinned in <b>models.lock</b> with SHA-256 verification, shipped as versioned release assets, never in git.</p>
+      <p>Recent work tuned the <b>decoder</b>, not just the model (onset 0.7, frame 0.4, min note 5 frames), lifting note accuracy on real recordings with no retraining. Next: real <b>dynamics</b>. An audit found velocity was tracking model confidence, not loudness; a per-pitch energy calibration now beats both the old estimate and a trained neural head.</p>
       <div class="stat-row">
         <div class="stat"><div class="v">84.3</div><div class="l">GuitarSet note F1 (was 80.2)</div></div>
         <div class="stat"><div class="v">73.5</div><div class="l">MAESTRO note F1 (was 69.5)</div></div>
@@ -155,31 +180,38 @@ footer a:hover{color:var(--teal)}
   </section>
 
   <section id="pricing">
-    <h2 class="serif">Pricing</h2>
-    <p class="sub">Because transcription runs on-device, the marginal cost is roughly zero — so there's a lifetime option almost nobody in the category has.</p>
+    <h2 class="serif">Pricing: Free, Pro or Lifetime</h2>
+    <p class="sub">Transcription runs on your iPhone, so alongside the subscriptions there is a one-time Lifetime option. Prices in USD; they may vary by country.</p>
     <div class="prices">
       <div class="price"><div class="tier">Free</div><div class="amount">$0</div><div class="per">forever</div>
-        <ul><li>Unlimited live transcription</li><li>3 saved pieces</li><li>30-second PDF export</li></ul></div>
+        <ul><li>Unlimited live transcription</li><li>3 saved pieces</li><li>MP3 and photo export</li><li>First 30 s of imports and PDF</li></ul></div>
       <div class="price hot"><div class="tier">Pro</div><div class="amount">$4.99<small style="font-size:18px">/mo</small></div><div class="per">or $29.99/yr · 7-day free trial</div>
-        <ul><li>Unlimited saves</li><li>Full-length import</li><li>MIDI + MusicXML + full PDF</li><li>Key / meter / tempo edits, slow playback</li></ul></div>
-      <div class="price"><div class="tier">Lifetime</div><div class="amount">$49.99</div><div class="per">one-time · launch price $39.99</div>
-        <ul><li>Pro forever</li><li>No subscription</li><li>No credits that don't renew</li></ul></div>
+        <ul><li>Unlimited saved pieces</li><li>Full-length audio and video imports</li><li>MIDI and MusicXML export</li><li>Full-length PDF export</li></ul></div>
+      <div class="price"><div class="tier">Lifetime</div><div class="amount">$49.99</div><div class="per">one-time purchase</div>
+        <ul><li>Everything in Pro</li><li>No subscription</li><li>Pay once</li></ul></div>
     </div>
   </section>
 
   <div class="hero" style="padding-top:20px">
     <h2 class="serif">Hum the song stuck in your head.<br>Get the notes in seconds.</h2>
     <div class="cta-row" style="margin-top:30px">
-      <a class="btn primary" href="https://grepawk.com/music-hear/">Try the web demo</a>
+      <a class="btn primary" href="https://grepawk.com/music-hear/" data-track="web_demo_click">Try the web demo</a>
     </div>
+    <span class="soon">The iPhone app is coming soon to the App Store.</span>
   </div>
 </div>
 
 <footer>
   <div class="wrap">
-    <div>© 2026 GrepAwk LLC · AI Music Radar · iOS 17+</div>
-    <div><a href="https://grepawk.com/music-radar/support">Support</a><a href="https://grepawk.com/music-radar/privacy">Privacy</a><a href="https://grepawk.com/music-radar/terms">Terms</a></div>
+    <div>© 2026 GrepAwk LLC · AI Music Radar · iOS and iPadOS 17+</div>
+    <div><a href="support">Support</a><a href="privacy">Privacy</a><a href="terms">Terms</a></div>
+    <nav class="more" aria-label="More apps by the same developer" style="flex-basis:100%">
+      <h2>More apps by the same developer</h2>
+      <a href="https://grepawk.com/" data-track="web_outbound_click">FinalCap, a chat-to-edit AI video editor</a>
+      <a href="https://photo.grepawk.com/" data-track="web_outbound_click">ProTune AI Camera: auto shutter, ISO and focus for iPhone</a>
+    </nav>
   </div>
 </footer>
+<script src="site.js" defer></script>
 </body>
 </html>

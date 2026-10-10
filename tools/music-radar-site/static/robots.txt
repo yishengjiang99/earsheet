@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+Disallow: /music-radar/api/
+Disallow: /music-radar/admin
+
+Sitemap: https://music.grepawk.com/sitemap.xml

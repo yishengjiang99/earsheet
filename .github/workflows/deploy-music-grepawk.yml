@@ -1,0 +1,153 @@
+name: Deploy music.grepawk.com
+
+# Deploys the AI Music Radar website (landing, legal pages, robots/sitemap/404, site.js) to
+# /var/www/music-radar on grepawk.com, then installs the music.grepawk.com nginx vhost from
+# tools/music-radar-site/nginx/ through the guarded installer (backup, nginx -t, smoke, rollback).
+# The same docroot is served at https://grepawk.com/music-radar/ (App Store URLs).
+#
+# Needs repo secret DEPLOY_SSH_KEY (and optionally DEPLOY_SSH_KNOWN_HOSTS) for root@grepawk.com.
+# Without it the job skips with a notice instead of failing.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/explainer/index.html'
+      - 'docs/explainer/*.jpg'
+      - 'docs/explainer/*.mp4'
+      - 'docs/legal/music-radar/**'
+      - 'docs/asc/screenshots/en-US/iphone-69-*.png'
+      - 'tools/music-radar-site/**'
+      - '.github/workflows/deploy-music-grepawk.yml'
+  workflow_dispatch:
+    inputs:
+      skip_nginx:
+        description: 'Deploy content only (skip the nginx vhost install)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-music-grepawk
+  cancel-in-progress: false
+
+env:
+  DEPLOY_HOST: grepawk.com
+  DEPLOY_USER: root
+  SITE: https://music.grepawk.com
+
+jobs:
+  installer-test:
+    # Same nginx (1.18) as the droplet: good install, no-op re-run, API-change and nginx -t rollbacks.
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nginx + tools
+        run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx curl openssl python3 > /dev/null && nginx -v
+      - name: Installer tests
+        run: bash tools/music-radar-site/nginx/test-installer.sh
+
+  deploy:
+    needs: installer-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy secret
+        id: secret
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [[ -z "${DEPLOY_SSH_KEY:-}" ]]; then
+            echo "::notice title=music.grepawk.com not deployed::DEPLOY_SSH_KEY secret is not set on this repo. Run: gh secret set DEPLOY_SSH_KEY -R yishengjiang99/earsheet < <key for root@grepawk.com>, then re-run this workflow."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate site files (no network)
+        run: |
+          set -euo pipefail
+          bash -n tools/music-radar-site/deploy-grepawk.sh tools/music-radar-site/nginx/install-vhost.sh
+          bash tools/music-radar-site/deploy-grepawk.sh --dry-run > /dev/null
+          f=docs/explainer/index.html
+          [[ "$(grep -o '<h1[ >]' "$f" | wc -l)" == 1 ]] || { echo "landing must have exactly one <h1>"; exit 1; }
+          grep -q '<link rel="canonical" href="https://music.grepawk.com/">' "$f"
+          python3 -c "import json,re,sys; s=open('$f').read(); [json.loads(m) for m in re.findall(r'<script type=\"application/ld\+json\">(.*?)</script>', s, re.S)]; print('json-ld ok')"
+          ! grep -qiE 'apps\.apple\.com' "$f" || { echo "no App Store link until AI Music Radar is live"; exit 1; }
+          sudo apt-get install -y -qq nginx-core > /dev/null 2>&1 || sudo apt-get install -y -qq nginx > /dev/null
+          T="$(mktemp -d)"; mkdir -p "$T/le"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=t -keyout "$T/le/k.pem" -out "$T/le/c.pem" 2>/dev/null
+          sed -e "s#/etc/letsencrypt/live/music.grepawk.com/fullchain.pem#$T/le/c.pem#" -e "s#/etc/letsencrypt/live/music.grepawk.com/privkey.pem#$T/le/k.pem#" \
+              -e '/options-ssl-nginx.conf/d' -e '/ssl-dhparams.pem/d' tools/music-radar-site/nginx/music.grepawk.com.conf > "$T/site.conf"
+          printf 'events {}\nhttp { include /etc/nginx/mime.types; include %s/site.conf; }\n' "$T" > "$T/nginx.conf"
+          sudo nginx -t -c "$T/nginx.conf"
+
+      - name: "GATE (pre-deploy): snapshot API status codes + headers"
+        if: steps.secret.outputs.ok == 'true'
+        run: |
+          mkdir -p deploy-gate
+          bash tools/music-radar-site/api-snapshot.sh "$SITE" tools/music-radar-site/api-snapshot-paths.txt > deploy-gate/api-before.txt
+          grep -c '^==' deploy-gate/api-before.txt
+
+      - name: Configure SSH
+        if: steps.secret.outputs.ok == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          if [[ -n "${DEPLOY_SSH_KNOWN_HOSTS:-}" ]]; then printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true; fi
+          chmod 600 ~/.ssh/known_hosts
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" 'echo ssh-ok'
+
+      - name: Deploy site content
+        if: steps.secret.outputs.ok == 'true'
+        env:
+          MUSIC_RADAR_DEPLOY_HOST: ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}
+        run: bash tools/music-radar-site/deploy-grepawk.sh
+
+      - name: Install nginx vhost (guarded, auto-rollback)
+        if: steps.secret.outputs.ok == 'true' && inputs.skip_nginx != true
+        run: |
+          set -euo pipefail
+          D="/tmp/music-site-${GITHUB_RUN_ID}"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$D'"
+          scp -q tools/music-radar-site/nginx/music.grepawk.com.conf tools/music-radar-site/nginx/install-vhost.sh "$DEPLOY_USER@$DEPLOY_HOST:$D/"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash '$D/install-vhost.sh' '$D/music.grepawk.com.conf'; rc=\$?; rm -rf '$D'; exit \$rc"
+
+      - name: "GATE (post-deploy): API unchanged + site checks"
+        if: steps.secret.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          bash tools/music-radar-site/api-snapshot.sh "$SITE" tools/music-radar-site/api-snapshot-paths.txt > deploy-gate/api-after.txt
+          if diff deploy-gate/api-before.txt deploy-gate/api-after.txt; then echo "API routes: status + headers identical"; else echo "FAIL: API responses changed" >&2; exit 1; fi
+          fails=0
+          chk() { local got; got="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$SITE$1")"; if [[ "$got" == "$2" ]]; then echo "ok   $1 -> $got"; else echo "FAIL $1 -> $got (want $2)"; fails=$((fails+1)); fi; }
+          for p in / /privacy /terms /support /robots.txt /sitemap.xml /site.js /og-1200x630.jpg; do chk "$p" 200; done
+          chk /this-page-does-not-exist 404
+          for p in "" privacy support terms; do
+            got="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://grepawk.com/music-radar/$p")"; [[ "$got" == 200 ]] && echo "ok   grepawk.com/music-radar/$p" || { echo "FAIL grepawk.com/music-radar/$p -> $got"; fails=$((fails+1)); }
+          done
+          if [[ "${{ inputs.skip_nginx }}" != "true" ]]; then
+            curl -s -o /dev/null -D - "$SITE/" | tr -d '\r' | grep -qi '^strict-transport-security: max-age=31536000' && echo "ok   HSTS" || { echo "FAIL HSTS"; fails=$((fails+1)); }
+            curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' "$SITE/" | tr -d '\r' | grep -qi '^content-encoding: gzip' && echo "ok   gzip" || { echo "FAIL gzip"; fails=$((fails+1)); }
+            curl -s "$SITE/this-page-does-not-exist" | grep -q 'Page not found' && echo "ok   404 page" || { echo "FAIL 404 page"; fails=$((fails+1)); }
+          fi
+          echo "site checks: $fails failure(s)"; [[ $fails -eq 0 ]]
+
+      - name: Upload gate artifacts
+        if: always() && steps.secret.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-gate-${{ github.run_id }}
+          path: deploy-gate/
+          if-no-files-found: ignore

@@ -1,0 +1,22 @@
+# GET-only probes of every music-radar-api route reachable through music.grepawk.com (no bodies, no writes).
+/api/health
+/api/iap/products
+/api/iap/entitlement
+/api/iap/entitlement?appAccountToken=00000000-0000-4000-8000-000000000000
+/api/iap/verify
+/api/telemetry/batch
+/api/devices/register
+/api/push/register
+/api/
+/api/nope
+/admin
+/admin/
+/admin/login
+/admin/devices
+/admin/telemetry
+/adminx
+/music-radar
+/music-radar/api/health
+/music-radar/api/iap/products
+/music-radar/admin/login
+/music-radar/api/nope
