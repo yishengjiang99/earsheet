@@ -1,3 +1,5 @@
+Added subscription terms and a functional Terms of Use (EULA) and Privacy Policy link to the App Store description, per 3.1.2.
+
 No account or login is needed; all features work on-device.
 
 How to reach the paywall (AI Music Radar Pro):
