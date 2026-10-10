@@ -114,6 +114,7 @@ final class PaywallPricingTests: XCTestCase {
             .appendingPathComponent("Products.storekit")
     }
 
+    @MainActor
     func testStoreKitConfigurationMatchesASC() throws {
         let data = try Data(contentsOf: Self.storekitURL)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -196,8 +197,14 @@ final class PaywallPricingTests: XCTestCase {
         XCTAssertEqual(monthly.price, Decimal(string: "4.99"))
         let yearlySub = try XCTUnwrap(yearly.subscription)
         XCTAssertEqual(PaywallPricing.Period(yearlySub.subscriptionPeriod), year)
-        // Fresh local StoreKit session: eligible, so trial copy appears; a 1-week free trial.
-        XCTAssertEqual(store.eligibleTrial(for: yearly), P.Trial(period: week))
+        // Fresh local StoreKit session: eligible, so trial copy appears. StoreKit reports the P1W
+        // intro period as 7 days (value 7, unit .day), which the copy renders as "7 days".
+        let trial = try XCTUnwrap(store.eligibleTrial(for: yearly))
+        XCTAssertEqual(trial.period.trialText, "7 days")
+        XCTAssertEqual(trial.period.trialAdjective, "7-day")
+        XCTAssertEqual(PaywallPricing.ctaTitle(isSubscription: true, displayPrice: yearly.displayPrice,
+                                               period: year, trial: trial),
+                       "Try 7 days free, then \(yearly.displayPrice)/year")
         let lifetime = try XCTUnwrap(store.product(for: ProStore.lifetimeID))
         XCTAssertNil(store.eligibleTrial(for: lifetime))
         let perMonth = try XCTUnwrap(P.monthlyEquivalent(price: yearly.price, period: year)).formatted(yearly.priceFormatStyle)
