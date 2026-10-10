@@ -1,0 +1,67 @@
+name: ASC submit version + first subscriptions + lifetime IAP
+
+# AI Music Radar (com.ragnus.pnge, ASC app 6818838017).
+# One reviewSubmission: app version + subscription group + both subscriptions + the lifetime non-consumable.
+# mode=status is read-only. post_build clears export compliance and adds the build to internal groups.
+# cancel pulls ONE reviewSubmission from review. submit SUBMITS FOR APP REVIEW: run only when the owner asks.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: status (read-only), post_build, cancel or submit
+        type: choice
+        options: [status, post_build, cancel, submit]
+        default: status
+      version_string:
+        description: App Store versionString
+        default: "1.0"
+      build_number:
+        description: CFBundleVersion
+        default: "19"
+      cancel_submission_id:
+        description: reviewSubmission id to pull from review (mode=cancel)
+        default: ""
+
+concurrency:
+  group: asc-submit
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+      BUNDLE_ID: com.ragnus.pnge
+      VERSION_STRING: ${{ inputs.version_string }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q PyJWT cryptography requests
+      - name: Wait for build VALID
+        if: ${{ inputs.mode == 'submit' || inputs.mode == 'post_build' }}
+        env: { MODE: wait_build }
+        run: python3 scripts/asc/submit_version_with_subscriptions.py
+      - name: Export compliance + internal TestFlight group
+        if: ${{ inputs.mode == 'post_build' }}
+        env: { MODE: post_build }
+        run: python3 scripts/asc/submit_version_with_subscriptions.py
+      - name: Submit version + subscription group + subscriptions + lifetime IAP
+        if: ${{ inputs.mode == 'submit' }}
+        env:
+          MODE: submit
+          REVIEW_NOTES_FILE: docs/asc/review_notes.txt
+        run: python3 scripts/asc/submit_version_with_subscriptions.py
+      - name: Status (read-only)
+        if: ${{ inputs.mode == 'status' }}
+        env: { MODE: status }
+        run: python3 scripts/asc/submit_version_with_subscriptions.py
+      - name: Cancel review submission (pull from review)
+        if: ${{ inputs.mode == 'cancel' }}
+        env:
+          MODE: cancel
+          CANCEL_SUBMISSION_ID: ${{ inputs.cancel_submission_id }}
+        run: python3 scripts/asc/submit_version_with_subscriptions.py

@@ -1,0 +1,16 @@
+No account or login is needed; all features work on-device.
+
+How to reach the paywall (AI Music Radar Pro):
+1. Launch the app and finish or skip onboarding to reach the Library.
+2. Tap the gear icon (Settings, top right), then tap "Go Pro".
+The paywall also opens when you tap MIDI or MusicXML export on a saved piece, or try to save a 4th piece.
+
+The paywall offers 3 options, all in App Store Connect and included in this submission:
+- Pro Yearly (com.ragnus.pnge.pro.yearly), auto-renewable, $29.99/year, 1-week free trial for eligible new subscribers
+- Pro Monthly (com.ragnus.pnge.pro.monthly), auto-renewable, $4.99/month, 1-week free trial for eligible new subscribers
+- Lifetime Pro (com.ragnus.pnge.lifetime), non-consumable, $49.99 one-time purchase
+Prices are loaded from StoreKit and shown in the local currency. The trial wording only appears when StoreKit reports the account is eligible for the introductory offer. The paywall shows the auto-renewal terms and has Restore Purchases, Terms of Use (Apple standard EULA) and Privacy Policy links. Restore Purchases is also in Settings.
+
+Sandbox purchases work: buy any option with a sandbox Apple Account and Pro unlocks immediately (unlimited saves, full-length imports, MIDI, MusicXML and full PDF export).
+
+Contact: Yisheng Jiang, yisheng.jiang@gmail.com, +1 669 251 7789
