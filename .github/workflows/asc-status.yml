@@ -55,4 +55,22 @@ jobs:
           for s in subs.get("data", []):
             a = s["attributes"]
             print("SUBMISSION", s["id"], a.get("state"), "submitted=", a.get("submittedDate"), "platform=", a.get("platform"))
+          if vers.get("data"):
+            vid = vers["data"][0]["id"]
+            locs = api(f"/v1/appStoreVersions/{vid}/appStoreVersionLocalizations?limit=50")
+            for l in locs.get("data", []):
+              la = l["attributes"]
+              d = la.get("description") or ""
+              print("LOCALIZATION", l["id"], la.get("locale"), f"{len(d)} chars")
+              print("----- DESCRIPTION BEGIN -----")
+              print(d)
+              print("----- DESCRIPTION END -----")
+          for s in subs.get("data", [])[:3]:
+            try:
+              items = api(f"/v1/reviewSubmissions/{s['id']}/items?limit=50")
+              for it in items.get("data", []):
+                rels = {k: (v.get("data") or {}).get("id") for k, v in (it.get("relationships") or {}).items() if isinstance(v, dict) and v.get("data")}
+                print("  ITEM", s["id"], it["id"], it["attributes"].get("state"), rels)
+            except Exception as e:
+              print("  ITEMS error", s["id"], e)
           PY
