@@ -144,6 +144,12 @@ jobs:
           fi
           echo "site checks: $fails failure(s)"; [[ $fails -eq 0 ]]
 
+      - name: IndexNow (non-fatal)
+        # Runs only after a successful deploy + gates. Never fails the job.
+        if: steps.secret.outputs.ok == 'true'
+        continue-on-error: true
+        run: bash tools/music-radar-site/indexnow-submit.sh music.grepawk.com de3f724316e49a9ace11ce786c44f02b tools/music-radar-site/static/sitemap.xml
+
       - name: Upload gate artifacts
         if: always() && steps.secret.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
