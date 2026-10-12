@@ -39,3 +39,7 @@ Repo Actions secrets (same values as omr-sheet-cam, finalcut, photo-recipes; set
 6. Check: `gh secret list -R yishengjiang99/<target>`.
 
 For a new repo, repeat steps 1–6 with the new target. Add a per-bundle profile secret only if that repo's workflow needs one.
+
+## Blog posts
+
+Posts for grepawk.com/blog go in `blog/<slug>/index.md`; see [blog/AGENTS.md](blog/AGENTS.md).
