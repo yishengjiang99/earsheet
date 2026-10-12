@@ -3,11 +3,19 @@ title: How AI Music Radar turns what you hear into sheet music on iPhone
 description: AI Music Radar transcribes playing, singing or humming into an engraved score on the iPhone itself. A walk through the pipeline and recent accuracy work.
 date: 2026-10-12
 publish: true
+hero: 02-sheet-music.jpg
+heroAlt: AI Music Radar showing an engraved score with tempo, meter and key detected
 product: ai-music-radar
 tags: [AI Music Radar, Basic Pitch, Core ML, music transcription]
 properNouns: [Radar, Music, Basic, Pitch, Swift]
 ---
 AI Music Radar listens while you play, sing or hum and writes the notes on a staff as you go. When you stop, you get an engraved score, a piano roll with playback, and MIDI, MusicXML and PDF export. All of the transcription happens on the iPhone. There is no sign-in, recordings are never uploaded, and it works in airplane mode.
+
+```gallery
+01-hear-it.jpg | The AI Music Radar library of recorded takes with a record button | Record a take or import audio
+02-sheet-music.jpg | An engraved score with tempo, meter and key shown above the staff | The engraved page
+04-piano-roll.jpg | The piano roll view of the same take | The piano roll
+```
 
 ## From microphone to score
 
@@ -18,6 +26,8 @@ The pipeline has five steps, and each one is small enough to test on its own.
 3. **Decoder.** Swift code turns those probabilities into discrete notes with a start, an end and a velocity.
 4. **Quantizer.** The notes are fitted to a tempo, a meter and a key, and snapped to a sixteenth-note grid.
 5. **Engraving.** The app lays out the staff itself and highlights each note as it plays back.
+
+![The export sheet offering MIDI, MusicXML, PDF, MP3 and a PNG photo of the score](05-export.jpg "Export to MIDI, MusicXML, PDF, MP3 or a PNG of the page.")
 
 The model weights are not stored in the source repository. They are pinned by SHA-256 in a lock file, checked on download and shipped as versioned release assets, so the app always runs the exact model that was tested.
 
