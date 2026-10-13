@@ -37,7 +37,6 @@ def main():
 
     model = inference.Model(str(ICASSP_2022_MODEL_PATH))
     pairs = list(ft.read_pairs(a.test))[:a.max_clips]
-    # precompute model outputs once
     outs = []
     for stem, wav_path, mid_path in pairs:
         out = inference.run_inference(str(wav_path), model)

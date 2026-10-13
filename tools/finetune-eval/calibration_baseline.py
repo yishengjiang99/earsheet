@@ -115,7 +115,6 @@ def main():
             audio = load_audio(wav_path)
             out = inference.run_inference(str(wav_path), model)
             events = ft.decode(out, a.onset_threshold, a.frame_threshold, a.min_note_len)
-            # estimated velocity from calibration
             est = []
             for s, e, p, *_ in events:
                 r = note_rms(audio, s, e)

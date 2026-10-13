@@ -101,7 +101,6 @@ def main():
     assert train_paths and val_paths, "no .npz files found"
     print(f"train files: {len(train_paths)}, val files: {len(val_paths)}", flush=True)
 
-    # count windows for steps_per_epoch
     w0 = np.load(train_paths[0])["feat"].shape[0]
     steps = max(1, len(train_paths) * w0 // a.batch)
     print(f"~{steps} steps/epoch", flush=True)

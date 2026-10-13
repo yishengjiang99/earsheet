@@ -351,7 +351,6 @@ struct ListeningView: View {
                 .padding(.horizontal, 32)
                 .padding(.top, 12)
 
-            // Live input level.
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
@@ -522,7 +521,6 @@ struct LivePianoRollView: View {
                 let x0 = max(0, x(note.onset)), x1 = min(size.width, x(end))
                 guard x1 > 0, x0 < size.width else { continue }
                 let y = CGFloat(range.upperBound - note.midi) * rh
-                // Fade brand-new notes in.
                 let alpha = min(1, max(0.35, (now - note.onset) / 0.4))
                 ctx.fill(Path(roundedRect: CGRect(x: x0, y: y + rh * 0.1, width: max(3, x1 - x0), height: max(2, rh * 0.8)),
                               cornerRadius: 2),
