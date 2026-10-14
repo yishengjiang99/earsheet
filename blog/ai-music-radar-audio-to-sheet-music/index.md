@@ -1,4 +1,5 @@
 ---
+keyword: sheet music
 title: How AI Music Radar turns what you hear into sheet music on iPhone
 description: AI Music Radar transcribes playing, singing or humming into an engraved score on the iPhone itself. A walk through the pipeline and recent accuracy work.
 date: 2026-10-12
