@@ -15,7 +15,7 @@ struct ExportView: View {
     @State private var showPaywall = false
     @State private var shareItems: [Any] = []
     @State private var showShare = false
-    @State private var isPreparing = false
+    @StateObject private var exporter = ExportCoordinator()
     @State private var notice: String?
 
     var body: some View {
@@ -71,6 +71,14 @@ struct ExportView: View {
                     }
                 }
             }
+            .disabled(exporter.isPreparing)
+            .overlay {
+                if exporter.isPreparing {
+                    ProgressView("Rendering MP3…")
+                        .padding(20)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
             .navigationTitle("Export")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -107,7 +115,7 @@ struct ExportView: View {
     }
 
     private var baseName: String {
-        take.title.replacingOccurrences(of: "[^a-zA-Z0-9-_ ]", with: "", options: .regularExpression)
+        ExportFileName.base(for: take.title)
     }
 
     private func shareFile(name: String, data: Data) {
@@ -139,15 +147,13 @@ struct ExportView: View {
     }
 
     private func exportMP3() {
-        isPreparing = true
-        Task {
+        exporter.runExclusively {
             do {
                 let mp3 = try await AudioExporter.mp3Data(for: score)
                 shareFile(name: "\(baseName).mp3", data: mp3)
             } catch {
                 notice = "Could not render MP3: \(error.localizedDescription)"
             }
-            isPreparing = false
         }
     }
 
