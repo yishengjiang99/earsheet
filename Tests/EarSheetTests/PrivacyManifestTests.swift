@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import XCTest
+@testable import EarSheet
 
-final class TelemetryPrivacyTests: XCTestCase {
+extension TelemetryPrivacyTests {
     private func manifest() throws -> [String: Any] {
         let url = try XCTUnwrap(
             Bundle.main.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"),
