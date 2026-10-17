@@ -62,9 +62,12 @@ final class ListeningSession: ObservableObject {
 
     init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers,
          recorder: Recording = AudioRecorder(),
-         requestMicPermission: @escaping MicPermissionRequest = ListeningSession.systemMicPermission,
-         loadModel: @escaping ModelLoader = ListeningSession.bundledModel,
-         finalizeNotes: @escaping NoteFinalizer = ListeningSession.finalizeHeardNotes) {
+         requestMicPermission: @escaping MicPermissionRequest = { await ListeningSession.systemMicPermission() },
+         loadModel: @escaping ModelLoader = { try await ListeningSession.bundledModel() },
+         finalizeNotes: @escaping NoteFinalizer = { streamer, samples, dropQuiet, gateDB in
+             try ListeningSession.finalizeHeardNotes(streamer: streamer, samples: samples,
+                                                     dropQuiet: dropQuiet, gateThresholdDB: gateDB)
+         }) {
         self.library = library
         self.proStore = proStore
         self.triggers = triggers
