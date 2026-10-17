@@ -75,4 +75,40 @@ final class ListeningFlowTests: XCTestCase {
         XCTAssertEqual(session.phase, .listening)
         XCTAssertEqual(recorder.startCount, 1)
     }
+
+    // MARK: - Failure cleanup (F4.3)
+
+    func testPumpFailureStopsRecorder() async {
+        struct PumpError: Error {}
+        let recorder = FakeRecorder()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertEqual(session.phase, .listening)
+        XCTAssertNotNil(recorder.onSamples)
+
+        session.handlePumpFailure(PumpError())
+
+        XCTAssertEqual(recorder.stopCount, 1, "the recorder is stopped exactly once")
+        XCTAssertNil(recorder.onSamples, "audio callbacks are detached")
+        XCTAssertNil(recorder.onLevel)
+        if case .failed(let message) = session.phase {
+            XCTAssertTrue(message.hasPrefix("Transcription failed"))
+        } else {
+            XCTFail("expected .failed, got \(session.phase)")
+        }
+        // A second failure report (late pump callback) must not stop it again.
+        session.handlePumpFailure(PumpError())
+        XCTAssertEqual(recorder.stopCount, 1)
+    }
+
+    func testStartFailureReleasesRecorderState() async {
+        struct NoMic: Error {}
+        let recorder = FakeRecorder()
+        recorder.startError = NoMic()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        await ListeningTestSupport.startAndWait(session)
+        if case .failed = session.phase {} else { XCTFail("expected .failed, got \(session.phase)") }
+        XCTAssertNil(recorder.onSamples)
+        XCTAssertEqual(recorder.stopCount, 0, "a recorder that never started is not stopped")
+    }
 }

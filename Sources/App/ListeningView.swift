@@ -50,6 +50,8 @@ final class ListeningSession: ObservableObject {
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
     private var timer: Timer?
+    /// True between a successful `recorder.start()` and the matching `stop()`.
+    private var recorderRunning = false
     /// Final PCM + note array stashed at stop(), for the debug export.
     private var finalSamples: [Float] = []
     private var finalNotes: [NoteEvent] = []
@@ -102,12 +104,33 @@ final class ListeningSession: ObservableObject {
                 queue.async { [weak self] in self?.pumpAndDecode(streamer: streamer) }
             }
             try recorder.start()
+            recorderRunning = true
             Telemetry.shared.track(.transcriptionStart, ["source": "mic"])
             phase = .listening
             startTimer()
         } catch {
+            teardownRecording()
             phase = .failed("Could not start listening: \(error.localizedDescription)")
         }
+    }
+
+    /// Stops the timer and the recorder (releasing the mic) and detaches its callbacks. Safe to call
+    /// more than once; returns the samples recorded (empty when the recorder was not running).
+    @discardableResult
+    private func teardownRecording() -> [Float] {
+        stopTimer()
+        recorder.onSamples = nil
+        recorder.onLevel = nil
+        guard recorderRunning else { return [] }
+        recorderRunning = false
+        return recorder.stop()
+    }
+
+    /// The streaming transcriber failed mid-listening: release the mic before showing the error.
+    func handlePumpFailure(_ error: Error) {
+        guard case .listening = phase else { return }
+        teardownRecording()
+        phase = .failed("Transcription failed: \(error.localizedDescription)")
     }
 
     /// Runs on the pump queue (nonisolated): inference + decode, then hops
@@ -123,17 +146,14 @@ final class ListeningSession: ObservableObject {
             }
         } catch {
             Task { @MainActor [weak self] in
-                self?.phase = .failed("Transcription failed: \(error.localizedDescription)")
+                self?.handlePumpFailure(error)
             }
         }
     }
 
     func stop(dueToLimit: Bool = false) {
         guard case .listening = phase else { return }
-        stopTimer()
-        recorder.onSamples = nil
-        recorder.onLevel = nil
-        let samples = recorder.stop()
+        let samples = teardownRecording()
         let durationS = Double(samples.count) / 22_050.0
         guard !samples.isEmpty else {
             Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": "silent"])
@@ -225,10 +245,7 @@ final class ListeningSession: ObservableObject {
 
     /// Records again in place (re-record from a held take): the unsaved take is discarded.
     func restart() {
-        stopTimer()
-        recorder.onSamples = nil
-        recorder.onLevel = nil
-        if case .listening = phase { _ = recorder.stop() }
+        teardownRecording()
         if let name = pendingTake?.audioFileName {
             try? FileManager.default.removeItem(at: TakeLibrary.audioURL(fileName: name))
         }
