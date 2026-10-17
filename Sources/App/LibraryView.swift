@@ -171,7 +171,7 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $showPaywall) {
-            PaywallView(store: proStore, trigger: "saveLimit")
+            PaywallView(store: proStore, trigger: PaywallTriggers.Trigger.saveLimit.analyticsName)
         }
         .onChange(of: showPaywall) { _, showing in
             if !showing && !proStore.isPro {
@@ -253,6 +253,11 @@ struct LibraryView: View {
         path = []
     }
 
+    /// What the shared upgrade-prompt policy needs to know about the Library right now.
+    private var promptContext: UpgradePromptContext {
+        UpgradePromptContext(proStore: proStore, finishedTakes: library.userTakes.count, isRecording: showListening)
+    }
+
     /// Shows `take` as Library > Take (replaces any open take).
     private func open(_ take: Take) {
         path = [take]
@@ -286,7 +291,7 @@ struct LibraryView: View {
                 library.postNotice("Your earlier unsaved piece \"\(previous.title)\" was replaced by this one.")
             }
             open(take)
-            if triggers.canShowAuto(.saveLimit) {
+            if triggers.decision(.saveLimit, context: promptContext).isShow {
                 triggers.recordAutoShown(.saveLimit)
                 paywallIsAuto = true
                 showPaywall = true

@@ -444,7 +444,7 @@ struct ListeningView: View {
             Text(session.notice ?? "")
         }
         .sheet(isPresented: $session.saveLimitReached) {
-            PaywallView(store: proStore, trigger: "saveLimit")
+            PaywallView(store: proStore, trigger: PaywallTriggers.Trigger.saveLimit.analyticsName)
         }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, session.holdsPendingTake {

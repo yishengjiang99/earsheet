@@ -39,6 +39,15 @@ final class ProStore: ObservableObject {
     /// Product.SubscriptionInfo.isEligibleForIntroOffer per subscription product id.
     @Published private(set) var introEligibility: [String: Bool] = [:]
     @Published var purchaseError: String?
+    /// A purchase is awaiting the App Store (the buy sheet is up or the transaction is being verified).
+    @Published private(set) var purchaseInFlight = false
+    /// Ask to Buy: the purchase waits for approval; cleared once Pro turns on.
+    @Published private(set) var purchasePendingApproval = false
+    /// A purchase failed (not a cancel) since launch: no automatic upgrade prompts for the rest of the session.
+    @Published private(set) var purchaseFailedThisSession = false
+
+    /// True while upgrade prompts must stay quiet because of a purchase (in flight, pending or failed).
+    var purchaseActive: Bool { purchaseInFlight || purchasePendingApproval || purchaseFailedThisSession }
 
     private var updatesTask: Task<Void, Never>?
     private var expiryTask: Task<Void, Never>?
@@ -113,6 +122,8 @@ final class ProStore: ObservableObject {
     /// Purchase a product. Returns true if the user is now Pro.
     func purchase(_ product: Product) async -> Bool {
         purchaseError = nil
+        purchaseInFlight = true
+        defer { purchaseInFlight = false }
         Telemetry.shared.track(.purchaseStart, ["product": product.id])
         do {
             let result = try await product.purchase(options: [
@@ -131,6 +142,7 @@ final class ProStore: ObservableObject {
                 return false
             case .pending:
                 purchaseError = "Purchase is pending approval."
+                purchasePendingApproval = true
                 PurchaseFunnel.pending.record(productID: product.id)
                 return false
             @unknown default:
@@ -143,6 +155,7 @@ final class ProStore: ObservableObject {
                 return false
             }
             purchaseError = StoreMessages.purchaseFailure(error)
+            purchaseFailedThisSession = true
             Telemetry.shared.track(.purchaseFail, StoreMessages.failureProperties(error, productID: product.id))
             return false
         }
@@ -185,6 +198,7 @@ final class ProStore: ObservableObject {
             }
         }
         isPro = pro
+        if pro { purchasePendingApproval = false }
         cache.isPro = pro
         cache.lastRefresh = Date()
         scheduleExpiryRefresh(at: pro ? earliestExpiry : nil)

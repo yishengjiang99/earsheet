@@ -61,6 +61,8 @@ final class Telemetry: @unchecked Sendable {
         case purchasePending = "purchase_pending"
         case paywallDismiss = "paywall_dismiss"
         case restore = "restore"
+        /// An automatic upgrade prompt was held back by the shared policy (`trigger`, `reason`).
+        case paywallTriggerSuppressed = "paywall_trigger_suppressed"
     }
 
     /// The only property keys that may leave the phone.

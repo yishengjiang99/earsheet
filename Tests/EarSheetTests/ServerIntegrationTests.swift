@@ -222,7 +222,7 @@ final class TelemetryTests: XCTestCase {
         XCTAssertEqual(Set(Telemetry.Event.allCases.map(\.rawValue)), [
             "app_open", "session_start", "transcription_start", "transcription_stop", "paywall_view",
             "purchase_start", "purchase_success", "purchase_fail", "purchase_cancel", "purchase_pending",
-            "paywall_dismiss", "restore",
+            "paywall_dismiss", "restore", "paywall_trigger_suppressed",
         ])
     }
 

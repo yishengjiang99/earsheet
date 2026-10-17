@@ -1,36 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import Foundation
 
-/// Paywall trigger gating per docs/paywall/PAYWALL_FLOW.md §2.
-///
-/// Automatic triggers (ranks 1–4, not from a locked-item tap):
-/// - max 1 per session, 2 per rolling 7 days
-/// - 72 h cooldown after a dismiss
-/// - rank-4 card shows once; may return once after 14 days, then never
-/// - after 5 lifetime dismissals, automatic prompts stop entirely
-/// Taps on locked items always open the paywall and never count.
+/// Paywall trigger state: persists the caps history (UserDefaults, injectable) and asks
+/// `UpgradePromptPolicy` for every decision. Automatic prompts (not caused by a tap) are capped;
+/// taps on locked items, Settings and "Keep it" never count and are only held back for Pro.
 @MainActor
 final class PaywallTriggers: ObservableObject {
-    enum Trigger: String {
+    enum Trigger: String, CaseIterable {
         case exportLockedRow
+        case firstExport
         case importLimit
         case saveLimit
         case thirdTranscription
         case settings
+
+        /// Triggers that fire without a tap on the paywall entry itself; these are capped.
+        var isAutomatic: Bool {
+            switch self {
+            case .exportLockedRow, .settings: return false
+            case .firstExport, .importLimit, .saveLimit, .thirdTranscription: return true
+            }
+        }
+
+        /// Anonymous value of the `trigger` property on paywall and prompt events.
+        var analyticsName: String {
+            switch self {
+            case .exportLockedRow: return "export_locked_row"
+            case .firstExport: return "export_first_share"
+            case .importLimit: return "import_limit"
+            case .saveLimit: return "save_limit"
+            case .thirdTranscription: return "third_transcription"
+            case .settings: return "settings"
+            }
+        }
     }
 
-    private let autoThisSessionKey = "paywall.autoThisSession"
     private let autoDatesKey = "paywall.autoDates"
     private let lastDismissKey = "paywall.lastDismiss"
     private let dismissCountKey = "paywall.dismissCount"
     private let rank4ShownKey = "paywall.rank4Shown"
     private let rank4ReturnedKey = "paywall.rank4Returned"
+    private let firstExportShownKey = "paywall.firstExportShown"
 
     private let defaults: UserDefaults
-    private var sessionCount = 0
+    private let report: (Telemetry.Event, [String: Any]) -> Void
+    private var shownThisSession = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard,
+         report: @escaping (Telemetry.Event, [String: Any]) -> Void = { Telemetry.shared.track($0, $1) }) {
         self.defaults = defaults
+        self.report = report
     }
 
     /// How a paywall presentation started. Only automatic presentations count toward the
@@ -40,52 +59,62 @@ final class PaywallTriggers: ObservableObject {
         case userInitiated
     }
 
-    /// Whether an automatic trigger may show now. Call `recordAutoShown()`
-    /// when it does, `recordDismiss()` when the user dismisses.
-    func canShowAuto(_ trigger: Trigger) -> Bool {
-        if sessionCount >= 1 { return false }
-        if lifetimeDismissals >= 5 { return false }
-        if let last = lastDismiss, Date().timeIntervalSince(last) < 72 * 3600 { return false }
-        let week = Date().addingTimeInterval(-7 * 24 * 3600)
-        if autoDates.filter({ $0 > week }).count >= 2 { return false }
-        if trigger == .thirdTranscription {
-            let shown = defaults.object(forKey: rank4ShownKey) as? Date
-            if let shown {
-                let returned = defaults.bool(forKey: rank4ReturnedKey)
-                if returned { return false }
-                if Date().timeIntervalSince(shown) < 14 * 24 * 3600 { return false }
-            }
+    /// The single gate for showing an upgrade prompt. `userInitiated` is true for taps on a
+    /// paywall entry. A held-back automatic prompt sends an anonymous `paywall_trigger_suppressed`.
+    func decision(_ trigger: Trigger, userInitiated: Bool = false,
+                  context: UpgradePromptContext, now: Date = Date()) -> UpgradePromptDecision {
+        let result = UpgradePromptPolicy.decide(trigger, userInitiated: userInitiated, context: context,
+                                                history: history, now: now)
+        if case .suppress(let reason) = result {
+            report(.paywallTriggerSuppressed, ["trigger": trigger.analyticsName, "reason": reason.rawValue])
         }
-        return true
+        return result
     }
 
-    func recordAutoShown(_ trigger: Trigger) {
-        sessionCount += 1
+    /// Call when an automatic prompt is shown.
+    func recordAutoShown(_ trigger: Trigger, now: Date = Date()) {
+        shownThisSession = true
         var dates = autoDates
-        dates.append(Date())
+        dates.append(now)
         defaults.set(dates, forKey: autoDatesKey)
-        if trigger == .thirdTranscription {
+        switch trigger {
+        case .thirdTranscription:
             if defaults.object(forKey: rank4ShownKey) == nil {
-                defaults.set(Date(), forKey: rank4ShownKey)
+                defaults.set(now, forKey: rank4ShownKey)
             } else {
                 defaults.set(true, forKey: rank4ReturnedKey)
             }
+        case .firstExport:
+            defaults.set(true, forKey: firstExportShownKey)
+        default:
+            break
         }
     }
 
-    /// Call when the paywall closes without a purchase. Counts only for automatic presentations.
-    func recordPaywallDismissed(_ source: PresentationSource) {
-        if source == .automatic { recordDismiss() }
-    }
-
-    func recordDismiss() {
-        defaults.set(Date(), forKey: lastDismissKey)
+    /// Call when the user dismisses an automatic prompt without taking the offer.
+    func recordDismiss(now: Date = Date()) {
+        defaults.set(now, forKey: lastDismissKey)
         defaults.set(lifetimeDismissals + 1, forKey: dismissCountKey)
     }
 
-    func resetSession() { sessionCount = 0 }
+    /// Call when the paywall closes without a purchase. Counts only for automatic presentations.
+    func recordPaywallDismissed(_ source: PresentationSource, now: Date = Date()) {
+        if source == .automatic { recordDismiss(now: now) }
+    }
+
+    func resetSession() { shownThisSession = false }
 
     // MARK: - Private
+
+    var history: UpgradePromptHistory {
+        UpgradePromptHistory(shownThisSession: shownThisSession,
+                             autoDates: autoDates,
+                             lastDismiss: lastDismiss,
+                             lifetimeDismissals: lifetimeDismissals,
+                             rank4Shown: defaults.object(forKey: rank4ShownKey) as? Date,
+                             rank4Returned: defaults.bool(forKey: rank4ReturnedKey),
+                             firstExportShown: defaults.bool(forKey: firstExportShownKey))
+    }
 
     private var autoDates: [Date] {
         defaults.array(forKey: autoDatesKey) as? [Date] ?? []
