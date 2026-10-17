@@ -157,7 +157,7 @@ struct PaywallView: View {
             Text("Every note, in every format.")
                 .font(.system(.title3, design: .serif))
                 .foregroundStyle(.secondary)
-            Text("Unlimited saves, full-length imports, and MIDI, MusicXML & full PDF export.")
+            Text(ImportPolicy.paywallHeader)
                 .font(.body)
                 .foregroundStyle(.secondary)
         }
@@ -291,7 +291,7 @@ struct PaywallView: View {
             Text("What Pro unlocks")
                 .font(.system(.headline, design: .serif))
             BenefitRow(icon: "infinity", text: "Unlimited saved pieces")
-            BenefitRow(icon: "waveform", text: "Full-length audio & video imports")
+            BenefitRow(icon: "waveform", text: ImportPolicy.benefitText)
             BenefitRow(icon: "square.and.arrow.up", text: "MIDI, MusicXML & full PDF export")
         }
     }
@@ -302,7 +302,7 @@ struct PaywallView: View {
                 .font(.system(.headline, design: .serif))
             ComparisonRow(feature: "Live transcription", free: "Unlimited", pro: "Unlimited")
             ComparisonRow(feature: "Saved pieces", free: "3", pro: "Unlimited")
-            ComparisonRow(feature: "Import length", free: "First 30 s", pro: "Full length")
+            ComparisonRow(feature: "Import length", free: ImportPolicy.comparisonFree, pro: ImportPolicy.comparisonPro)
             ComparisonRow(feature: "PDF export", free: "First 30 s", pro: "Full length")
             ComparisonRow(feature: "MIDI & MusicXML", free: "–", pro: "Included")
             ComparisonRow(feature: "MP3 & photo", free: "Included", pro: "Included")
