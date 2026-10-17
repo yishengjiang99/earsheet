@@ -43,6 +43,7 @@ POST /api/telemetry/batch
 | `playback_start` | `view` (page\|roll) |
 | `paywall_view` | `trigger` (export\|import_limit\|save_limit\|soft_card\|settings), `variant` |
 | `paywall_dismiss` | `trigger` |
+| `soft_prompt_shown` / `soft_prompt_tapped` / `soft_prompt_dismissed` | `kind` (import_limit\|export\|third_transcription\|meter), `result` (dismissed: free\|cancel\|close) |
 | `paywall_trigger_suppressed` | `trigger` (save_limit\|import_limit\|third_transcription\|export_first_share), `reason` (pro\|recording\|no_value_yet\|purchase_in_flight\|session_cap\|weekly_cap\|cooldown\|lifetime_cap\|rank4_once\|rank4_wait\|already_shown): an automatic upgrade prompt held back by the shared policy (`UpgradePromptPolicy`). Anonymous, local caps only. |
 | `purchase_start` / `purchase_success` / `purchase_fail` / `purchase_cancel` | `product` (product ID), `error` (fail: StoreKit error code, no message text) |
 | `trial_start` | `product` |

@@ -17,6 +17,7 @@ struct LibraryView: View {
     @State private var importTask: Task<Void, Never>?
     @State private var importState = ImportCoordinator()
     @State private var showPaywall = false
+    @StateObject private var importGate = ImportLimitGate()
     @State private var showSettings = false
     /// An import held by the free save limit: shown as Library > Take with a "Not saved yet" banner.
     @State private var heldImport = HeldImport()
@@ -170,6 +171,11 @@ struct LibraryView: View {
                 }
             }
         }
+        .sheet(item: $importGate.request, onDismiss: { importGate.resolve(.cancel) }) { request in
+            ImportLimitSheet(durationSeconds: request.durationSeconds, proStore: proStore) { choice in
+                importGate.resolve(choice)
+            }
+        }
         .sheet(isPresented: $showPaywall) {
             PaywallView(store: proStore, trigger: PaywallTriggers.Trigger.saveLimit.analyticsName)
         }
@@ -314,6 +320,18 @@ struct LibraryView: View {
         }
     }
 
+    /// Before a long file is transcribed, a free user may get the import-limit sheet (policy
+    /// permitting). False means the import was cancelled. A suppressed prompt just continues as a
+    /// free import (first 30 s, with the usual notice).
+    private func confirmImportLength(seconds: Double) async -> Bool {
+        guard ImportLimitPrompt.decision(durationSeconds: seconds, isPro: proStore.isPro) == .prompt,
+              triggers.decision(.importLimit, context: promptContext).isShow else { return true }
+        triggers.recordAutoShown(.importLimit)
+        let choice = await importGate.ask(durationSeconds: seconds)
+        if choice != .pro && !Task.isCancelled { triggers.recordDismiss() }
+        return choice != .cancel && !Task.isCancelled
+    }
+
     /// MIDI carries notes already: parse and quantize, no transcription.
     private func importMIDI(url: URL) {
         Task { @MainActor in
@@ -356,6 +374,7 @@ struct LibraryView: View {
                     library.postNotice(ImportCoordinator.emptyAudioNotice(for: .video))
                     return
                 }
+                guard await confirmImportLength(seconds: Double(loaded.count) / AudioRecorder.targetSampleRate) else { return }
                 let isPro = proStore.isPro
                 let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
@@ -397,6 +416,7 @@ struct LibraryView: View {
                     library.postNotice(ImportCoordinator.emptyAudioNotice(for: .audio))
                     return
                 }
+                guard await confirmImportLength(seconds: Double(loaded.count) / AudioRecorder.targetSampleRate) else { return }
                 let isPro = proStore.isPro
                 let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
