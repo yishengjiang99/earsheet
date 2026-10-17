@@ -58,4 +58,21 @@ final class ListeningFlowTests: XCTestCase {
         XCTAssertEqual(ImportCoordinator.emptyAudioNotice(for: .audio), "No audio found in that file.")
         XCTAssertEqual(ImportCoordinator.emptyAudioNotice(for: .video), "No audio found in that video.")
     }
+
+    // MARK: - Mic permission (F3.3)
+
+    func testDeniedPermissionPhaseIsTyped() async {
+        let recorder = FakeRecorder()
+        let permission = PermissionFlag(false)
+        let session = ListeningTestSupport.makeSession(recorder: recorder, permission: permission)
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertEqual(session.phase, .permissionDenied, "denied is its own phase, not a message string")
+        XCTAssertEqual(recorder.startCount, 0, "the mic is never opened without permission")
+
+        // Enabled in Settings: the same session retries in place without leaving the screen.
+        permission.granted = true
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertEqual(session.phase, .listening)
+        XCTAssertEqual(recorder.startCount, 1)
+    }
 }

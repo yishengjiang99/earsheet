@@ -14,11 +14,13 @@ final class ListeningSession: ObservableObject {
         case listening
         case writing
         case done(Take)
+        case permissionDenied
         case failed(String)
 
         static func == (lhs: Phase, rhs: Phase) -> Bool {
             switch (lhs, rhs) {
-            case (.preparing, .preparing), (.listening, .listening), (.writing, .writing):
+            case (.preparing, .preparing), (.listening, .listening), (.writing, .writing),
+                 (.permissionDenied, .permissionDenied):
                 true
             case (.done(let a), .done(let b)): a.id == b.id
             case (.failed(let a), .failed(let b)): a == b
@@ -40,7 +42,11 @@ final class ListeningSession: ObservableObject {
     private let proStore: ProStore
     private let triggers: PaywallTriggers
     private var pendingTake: Take?
-    private let recorder = AudioRecorder()
+    private let recorder: Recording
+    private let requestMicPermission: MicPermissionRequest
+    private let loadModel: ModelLoader
+    /// The in-flight permission + warm-up task (tests await it).
+    private(set) var startTask: Task<Void, Never>?
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
     private var timer: Timer?
@@ -48,39 +54,50 @@ final class ListeningSession: ObservableObject {
     private var finalSamples: [Float] = []
     private var finalNotes: [NoteEvent] = []
 
-    init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers) {
+    init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers,
+         recorder: Recording = AudioRecorder(),
+         requestMicPermission: @escaping MicPermissionRequest = ListeningSession.systemMicPermission,
+         loadModel: @escaping ModelLoader = ListeningSession.bundledModel) {
         self.library = library
         self.proStore = proStore
         self.triggers = triggers
+        self.recorder = recorder
+        self.requestMicPermission = requestMicPermission
+        self.loadModel = loadModel
     }
 
+    /// Asks for the mic and starts warming up. Safe to call again from `.permissionDenied` (retry
+    /// after the user changed the setting); a no-op in any other phase or while already starting.
     func start() {
-        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard granted else {
-                    self.phase = .failed("Microphone access is denied. Enable it in Settings to listen.")
-                    return
-                }
-                await self.begin()
+        switch phase {
+        case .preparing, .permissionDenied: break
+        default: return
+        }
+        guard startTask == nil else { return }
+        startTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.startTask = nil }
+            let granted = await self.requestMicPermission()
+            guard granted else {
+                self.phase = .permissionDenied
+                return
             }
+            await self.begin()
         }
     }
 
     private func begin() async {
         // Load the model before opening the mic; inference must keep up live.
         do {
-            let model = try await runCancellableDetached {
-                try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
-            }
-            let streamer = StreamingTranscriber(model: model)
+            let model = try await loadModel()
+            let streamer = model.map { StreamingTranscriber(model: $0) }
             self.streamer = streamer
             let queue = self.pumpQueue
             recorder.onLevel = { [weak self] p in
                 Task { @MainActor [weak self] in self?.level = p }
             }
             recorder.onSamples = { [weak self] samples in
-                guard let self else { return }
+                guard let self, let streamer else { return }
                 streamer.append(samples)
                 queue.async { [weak self] in self?.pumpAndDecode(streamer: streamer) }
             }
@@ -242,7 +259,8 @@ final class ListeningSession: ObservableObject {
 
     private func startTimer() {
         stopTimer()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] t in
+            if self == nil { t.invalidate(); return }
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
@@ -270,6 +288,7 @@ struct ListeningView: View {
     /// opens the take (Library > Take), so back never returns to listening.
     var onSaved: ((Take) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var confirmReRecord = false
     @State private var debugShareItems: [Any] = []
     @State private var showDebugShare = false
@@ -285,6 +304,8 @@ struct ListeningView: View {
                 listeningBody
             case .done(let take):
                 doneBody(take: take)
+            case .permissionDenied:
+                permissionDeniedBody
             case .failed(let message):
                 failedBody(message: message)
             }
@@ -312,6 +333,10 @@ struct ListeningView: View {
             }
         }
         .onAppear { session.start() }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Back from Settings after enabling the microphone: try again without leaving the screen.
+            if newPhase == .active, session.phase == .permissionDenied { session.start() }
+        }
         .onChange(of: session.phase) { _, phase in
             if case .done(let take) = phase, !session.holdsPendingTake { onSaved?(take) }
         }
@@ -409,7 +434,7 @@ struct ListeningView: View {
         guard session.canDebugExport else { return false }
         switch session.phase {
         case .listening, .writing, .done: return true
-        case .preparing, .failed: return false
+        case .preparing, .permissionDenied, .failed: return false
         }
     }
 
@@ -456,6 +481,29 @@ struct ListeningView: View {
                 }
         } else {
             Color.clear
+        }
+    }
+
+    private var permissionDeniedBody: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "mic.slash")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("AI Music Radar needs the microphone to listen. Allow microphone access in Settings, then come back and try again.")
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Ink.teal)
+            Button("Try again") { session.start() }
+            Button("Back to library") { dismiss() }
+                .foregroundStyle(.secondary)
+            Spacer()
         }
     }
 
