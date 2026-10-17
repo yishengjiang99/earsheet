@@ -7,6 +7,7 @@ import HearSheet
 final class FakeRecorder: Recording {
     var onSamples: (([Float]) -> Void)?
     var onLevel: ((Float) -> Void)?
+    var onInterruption: ((Bool) -> Void)?
     var recordedSeconds: Double = 0
     var currentSamples: [Float] = []
     var gateThresholdDB: Double = -60

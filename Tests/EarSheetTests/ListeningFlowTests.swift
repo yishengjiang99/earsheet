@@ -209,4 +209,55 @@ final class ListeningFlowTests: XCTestCase {
         let name = try XCTUnwrap(take.audioFileName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: TakeLibrary.audioURL(fileName: name).path))
     }
+
+    // MARK: - Backgrounding and interruptions (F4.6)
+
+    func testBackgroundDuringListeningFinalizesTake() async {
+        let recorder = FakeRecorder()
+        recorder.samplesToReturn = [Float](repeating: 0.3, count: 22_050)
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertEqual(session.phase, .listening)
+
+        session.handleScenePhase(.inactive)
+        session.handleScenePhase(.active)
+        XCTAssertEqual(session.phase, .listening, "only .background ends the take")
+
+        session.handleScenePhase(.background)
+
+        XCTAssertEqual(session.phase, .writing, "the take is finalized, not left as a stale listening screen")
+        XCTAssertEqual(recorder.stopCount, 1)
+        XCTAssertNotNil(session.notice, "the user is told why it ended")
+
+        session.handleScenePhase(.background) // already finalizing: no second stop
+        XCTAssertEqual(recorder.stopCount, 1)
+    }
+
+    func testBackgroundWhileNotListeningDoesNothing() {
+        let recorder = FakeRecorder()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        session.handleScenePhase(.background)
+        XCTAssertEqual(session.phase, .preparing)
+        XCTAssertEqual(recorder.stopCount, 0)
+    }
+
+    func testInterruptionShowsPausedAndClearsOnEnd() async {
+        let recorder = FakeRecorder()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        XCTAssertFalse(session.isPaused)
+        session.setPaused(true)
+        XCTAssertFalse(session.isPaused, "not listening: nothing to pause")
+
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertNotNil(recorder.onInterruption, "the session subscribes to recorder interruptions")
+        session.setPaused(true)
+        XCTAssertTrue(session.isPaused)
+        session.setPaused(false)
+        XCTAssertFalse(session.isPaused)
+
+        session.setPaused(true)
+        session.cancel()
+        XCTAssertFalse(session.isPaused, "teardown clears the indicator")
+        XCTAssertNil(recorder.onInterruption)
+    }
 }

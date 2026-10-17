@@ -32,6 +32,10 @@ public final class AudioRecorder {
     /// Used by the live-listening screen to feed the streaming transcriber.
     public var onSamples: (([Float]) -> Void)?
 
+    /// Called (from a notification thread) when an audio interruption such as a call or Siri begins
+    /// (`true`) or ends (`false`). Capture resumes by itself after `false`.
+    public var onInterruption: ((Bool) -> Void)?
+
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                        sampleRate: AudioRecorder.targetSampleRate,
                                        channels: 1, interleaved: false)!
@@ -144,7 +148,9 @@ public final class AudioRecorder {
             #if os(iOS)
             if note.name == AVAudioSession.interruptionNotification {
                 let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-                guard raw.flatMap(AVAudioSession.InterruptionType.init) == .ended else { return }
+                let type = raw.flatMap(AVAudioSession.InterruptionType.init)
+                if let type { self?.onInterruption?(type == .began) }
+                guard type == .ended else { return }
             }
             #endif
             DispatchQueue.main.async { self?.restartIfRecording() }

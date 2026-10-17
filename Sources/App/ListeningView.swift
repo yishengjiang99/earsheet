@@ -36,6 +36,8 @@ final class ListeningSession: ObservableObject {
     @Published private(set) var level: Float = 0
     @Published private(set) var notice: String?
     @Published var saveLimitReached = false
+    /// True while a call/Siri interruption has the microphone: the timer is frozen, not broken.
+    @Published private(set) var isPaused = false
     /// True once there is recorded audio worth exporting (debug: PCM + note array).
     @Published private(set) var canDebugExport = false
 
@@ -102,6 +104,9 @@ final class ListeningSession: ObservableObject {
             recorder.onLevel = { [weak self] p in
                 Task { @MainActor [weak self] in self?.level = p }
             }
+            recorder.onInterruption = { [weak self] began in
+                Task { @MainActor [weak self] in self?.setPaused(began) }
+            }
             recorder.onSamples = { [weak self] samples in
                 guard let self, let streamer else { return }
                 streamer.append(samples)
@@ -125,6 +130,8 @@ final class ListeningSession: ObservableObject {
         stopTimer()
         recorder.onSamples = nil
         recorder.onLevel = nil
+        recorder.onInterruption = nil
+        isPaused = false
         guard recorderRunning else { return [] }
         recorderRunning = false
         return recorder.stop()
@@ -155,7 +162,28 @@ final class ListeningSession: ObservableObject {
         }
     }
 
+    /// Why a listening session ended without the user pressing Stop.
+    enum AutoStopReason { case limit, backgrounded }
+
     func stop(dueToLimit: Bool = false) {
+        let reason: AutoStopReason? = dueToLimit ? .limit : nil
+        stop(reason: reason)
+    }
+
+    /// Shows or hides the "Paused" indicator (an audio interruption began or ended).
+    func setPaused(_ paused: Bool) {
+        if case .listening = phase { isPaused = paused } else { isPaused = false }
+    }
+
+    /// Leaving the app mid-take (lock, home, app switch) ends listening: iOS stops the mic anyway
+    /// (no background audio mode), so the session finalizes what was heard instead of showing a
+    /// frozen timer on return.
+    func handleScenePhase(_ newPhase: ScenePhase) {
+        guard newPhase == .background, case .listening = phase else { return }
+        stop(reason: .backgrounded)
+    }
+
+    func stop(reason: AutoStopReason?) {
         guard case .listening = phase else { return }
         let samples = teardownRecording()
         let durationS = Double(samples.count) / 22_050.0
@@ -171,8 +199,13 @@ final class ListeningSession: ObservableObject {
         }
         finalSamples = samples
         canDebugExport = true
-        if dueToLimit {
+        switch reason {
+        case .limit?:
             notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
+        case .backgrounded?:
+            notice = "Listening stopped when you left the app — here is what was heard."
+        case nil:
+            break
         }
         phase = .writing
         let streamer = self.streamer
@@ -403,6 +436,7 @@ struct ListeningView: View {
         }
         .onAppear { session.start() }
         .onChange(of: scenePhase) { _, newPhase in
+            session.handleScenePhase(newPhase)
             // Back from Settings after enabling the microphone: try again without leaving the screen.
             if newPhase == .active, session.phase == .permissionDenied { session.start() }
         }
@@ -479,7 +513,14 @@ struct ListeningView: View {
                 .padding(.horizontal, 12)
 
             HStack(spacing: 8) {
-                Circle().fill(Color.red).frame(width: 8, height: 8)
+                if session.isPaused {
+                    Image(systemName: "pause.fill").font(.caption).foregroundStyle(.secondary)
+                    Text("Paused")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                }
                 Text("\(formattedElapsed(session.elapsed)) / \(formattedElapsed(Transcriber.maxDurationSeconds))")
                     .font(.system(.body, design: .monospaced))
                     .accessibilityLabel("Recording time \(formattedElapsed(session.elapsed)) of \(formattedElapsed(Transcriber.maxDurationSeconds)) limit")
