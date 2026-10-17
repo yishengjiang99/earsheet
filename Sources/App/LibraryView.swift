@@ -205,7 +205,7 @@ struct LibraryView: View {
 
     /// Save a transcribed score, or hold it behind the paywall at the free limit.
     private func saveImportedScore(_ score: QuantizedScore, title: String? = nil, events: [NoteEvent]) {
-        if !proStore.isPro && library.userTakes.count >= ProStore.freeSaveLimit {
+        if SaveGate.decision(isPro: proStore.isPro, savedCount: library.userTakes.count) == .held {
             pendingScore = (score, title, events)
             if triggers.canShowAuto(.saveLimit) {
                 triggers.recordAutoShown(.saveLimit)
@@ -297,7 +297,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
-                    open(library.addTake(score: score, events: notes))
+                    saveImportedScore(score, events: notes)
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
