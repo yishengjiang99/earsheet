@@ -15,6 +15,7 @@ struct LibraryView: View {
     @State private var listeningSession: ListeningSession?
     @State private var showListening = false
     @State private var importTask: Task<Void, Never>?
+    @State private var importState = ImportCoordinator()
     @State private var showPaywall = false
     @State private var showSettings = false
     @State private var pendingScore: (score: QuantizedScore, title: String?, events: [NoteEvent])?
@@ -83,6 +84,7 @@ struct LibraryView: View {
                                     .foregroundStyle(.blue)
                             }
                         }
+                        .disabled(importState.isImporting)
                         .accessibilityLabel("Import video from Photos")
                         .accessibilityHint("Chooses a video from Photos and transcribes its audio")
                     }
@@ -113,6 +115,7 @@ struct LibraryView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
+                    .disabled(importState.isImporting)
                     .accessibilityLabel("Import audio")
                     .accessibilityHint("Import an audio or MIDI file, or a video from Photos")
                 }
@@ -171,6 +174,7 @@ struct LibraryView: View {
                 }
             }
         }
+        .overlay { importOverlay }
         .alert("AI Music Radar", isPresented: Binding(
             get: { library.notice != nil },
             set: { if !$0 { library.clearNotice() } }
@@ -179,6 +183,31 @@ struct LibraryView: View {
         } message: {
             Text(library.notice ?? "")
         }
+    }
+
+    /// Blocking "Transcribing…" overlay with Cancel while an audio/video import is decoding or transcribing.
+    @ViewBuilder
+    private var importOverlay: some View {
+        if importState.isImporting {
+            ZStack {
+                Color.black.opacity(0.25).ignoresSafeArea()
+                VStack(spacing: 16) {
+                    ProgressView("Transcribing…")
+                    Button("Cancel", role: .cancel, action: cancelImport)
+                        .accessibilityIdentifier("import.cancel")
+                }
+                .padding(24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("import.progress")
+        }
+    }
+
+    private func cancelImport() {
+        importTask?.cancel()
+        importTask = nil
+        importState.cancel()
     }
 
     /// Shows `take` as Library > Take (replaces any open take).
@@ -258,14 +287,19 @@ struct LibraryView: View {
 
     /// Video from Photos: extract the audio track, then transcribe as usual.
     private func importVideo(url: URL) {
-        importTask?.cancel()
+        guard let token = importState.begin(.video) else { return }
         importTask = Task { @MainActor in
+            defer { importState.finish(token) }
             do {
                 let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(asset: AVAsset(url: url))
                 }
                 try? FileManager.default.removeItem(at: url) // temp copy
-                guard !loaded.isEmpty else { return }
+                try Task.checkCancellation()
+                guard !loaded.isEmpty else {
+                    library.postNotice(ImportCoordinator.emptyAudioNotice(for: .video))
+                    return
+                }
                 let isPro = proStore.isPro
                 let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
@@ -274,6 +308,7 @@ struct LibraryView: View {
                     let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }
+                try Task.checkCancellation()
                 let score = Quantizer.quantize(notes)
                 Telemetry.shared.track(.transcriptionStop, ["source": "video", "duration_s": durationS,
                                                             "notes": score.notes.count])
@@ -283,7 +318,7 @@ struct LibraryView: View {
                     finishImport(score, events: notes, isPro: isPro, trimmed: trimmed)
                 }
             } catch is CancellationError {
-                // Superseded by a newer import; stay silent.
+                // Cancelled by the user; stay silent.
             } catch {
                 try? FileManager.default.removeItem(at: url)
                 library.postNotice(ImportErrorMessage.message(for: error, source: .video))
@@ -292,13 +327,18 @@ struct LibraryView: View {
     }
 
     private func importAudio(url: URL) {
-        importTask?.cancel()
+        guard let token = importState.begin(.audio) else { return }
         importTask = Task { @MainActor in
+            defer { importState.finish(token) }
             do {
                 let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(url: url)
                 }
-                guard !loaded.isEmpty else { return }
+                try Task.checkCancellation()
+                guard !loaded.isEmpty else {
+                    library.postNotice(ImportCoordinator.emptyAudioNotice(for: .audio))
+                    return
+                }
                 let isPro = proStore.isPro
                 let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
@@ -307,6 +347,7 @@ struct LibraryView: View {
                     let model = try ModelBox.shared.get(modelsDirectory: BundledModels.modelsDirectory())
                     return try Transcriber.transcribe(samples: samples, model: model)
                 }
+                try Task.checkCancellation()
                 let score = Quantizer.quantize(notes)
                 Telemetry.shared.track(.transcriptionStop, ["source": "import", "duration_s": durationS,
                                                             "notes": score.notes.count])
@@ -316,7 +357,7 @@ struct LibraryView: View {
                     finishImport(score, events: notes, isPro: isPro, trimmed: trimmed)
                 }
             } catch is CancellationError {
-                // Superseded by a newer import; stay silent.
+                // Cancelled by the user; stay silent.
             } catch {
                 library.postNotice(ImportErrorMessage.message(for: error, source: .audio))
             }
