@@ -167,7 +167,7 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $showPaywall) {
-                PaywallView(store: store)
+                PaywallView(store: store, trigger: "settings")
             }
             .alert("Restore Purchases", isPresented: Binding(
                 get: { restoreMessage != nil },

@@ -8,6 +8,8 @@ import StoreKit
 /// Guideline 3.1.2: localized price + period, auto-renew terms, Restore, Terms (Apple standard EULA), Privacy.
 struct PaywallView: View {
     @ObservedObject var store: ProStore
+    /// Anonymous label for what opened the paywall (e.g. "settings"), sent with `paywall_view` / `paywall_dismiss`.
+    var trigger: String? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedID: String = ProStore.yearlyID
@@ -82,11 +84,15 @@ struct PaywallView: View {
                 }
             }
             .task {
-                Telemetry.shared.track(.paywallView)
+                Telemetry.shared.track(.paywallView, triggerProperties)
                 await store.loadProducts()
                 selectDefaultPlan()
             }
             .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
+            .onDisappear {
+                // Closing after a purchase is a conversion, not a dismissal.
+                if !store.isPro { Telemetry.shared.track(.paywallDismiss, triggerProperties) }
+            }
             .alert("AI Music Radar", isPresented: Binding(
                 get: { alertMessage != nil },
                 set: { if !$0 { store.purchaseError = nil; restoreNotice = nil } }
@@ -96,6 +102,10 @@ struct PaywallView: View {
                 Text(alertMessage ?? "")
             }
         }
+    }
+
+    private var triggerProperties: [String: Any] {
+        trigger.map { ["trigger": $0] } ?? [:]
     }
 
     /// A restore result, or else the last purchase error / pending notice.
