@@ -99,11 +99,22 @@ final class TakeLibrary: ObservableObject {
 
     var userTakes: [Take] { takes }
 
+    /// "Take N" with N one more than the highest "Take N" in `titles` (not the count, so deleting
+    /// "Take 2" of three and recording again gives "Take 4", never a second "Take 3").
+    nonisolated static func nextDefaultTitle(among titles: [String]) -> String {
+        let prefix = "Take "
+        let highest = titles.compactMap { title -> Int? in
+            guard title.hasPrefix(prefix) else { return nil }
+            return Int(title.dropFirst(prefix.count))
+        }.max() ?? 0
+        return "\(prefix)\(highest + 1)"
+    }
+
     /// Builds a take (default title included) without adding it to the library.
     func makeTake(title: String? = nil, score: QuantizedScore, events: [NoteEvent]? = nil,
                   audioFileName: String? = nil) -> Take {
         Take(id: UUID(),
-             title: title ?? "Take \(takes.count + 1)",
+             title: title ?? Self.nextDefaultTitle(among: takes.map(\.title)),
              createdAt: Date(),
              score: score,
              isSample: false,
