@@ -150,6 +150,7 @@ final class ProStore: ObservableObject {
 
     /// Restore: sync with the App Store, then refresh from current entitlements.
     /// A user cancel of the App Store sign-in prompt is silent (`.cancelled`, no alert).
+    /// The result carries the message; callers present it (Settings and the paywall each show their own alert).
     @discardableResult
     func restore() async -> RestoreResult {
         purchaseError = nil
@@ -161,16 +162,13 @@ final class ProStore: ObservableObject {
                 return .cancelled
             }
             let message = StoreMessages.restoreFailure(error)
-            purchaseError = message
             Telemetry.shared.track(.restore, ["result": "fail", "code": (error as NSError).code])
             return .failed(message)
         }
         let restored = await reportCurrentEntitlements()
         await refreshEntitlement()
         Telemetry.shared.track(.restore, ["result": isPro ? "success" : "none", "restored": restored])
-        if isPro { return .restored }
-        purchaseError = "No Pro purchase found on this Apple ID."
-        return .none
+        return isPro ? .restored : .none
     }
 
     // MARK: - Entitlement
@@ -263,6 +261,19 @@ enum RestoreResult: Equatable {
     case cancelled
     /// Plain-language, retryable message.
     case failed(String)
+
+    static let noneMessage = "No Pro purchase found on this Apple ID."
+    static let restoredMessage = "Pro is active on this Apple ID. Thanks for supporting AI Music Radar!"
+
+    /// Text for the result alert (shared by Settings and the paywall); nil when nothing should be shown.
+    var message: String? {
+        switch self {
+        case .restored: return Self.restoredMessage
+        case .none: return Self.noneMessage
+        case .cancelled: return nil
+        case .failed(let message): return message
+        }
+    }
 }
 
 enum ProStoreError: Error, LocalizedError {
