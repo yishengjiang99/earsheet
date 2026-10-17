@@ -484,11 +484,6 @@ struct ListeningView: View {
         .sheet(isPresented: $showDebugShare) {
             ShareSheet(items: debugShareItems)
         }
-        .onChange(of: session.saveLimitReached) { _, showing in
-            if !showing && !proStore.isPro {
-                triggers.recordDismiss()
-            }
-        }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, session.holdsPendingTake {
                 session.savePendingTake()

@@ -174,8 +174,8 @@ struct LibraryView: View {
             PaywallView(store: proStore)
         }
         .onChange(of: showPaywall) { _, showing in
-            if !showing && !proStore.isPro && paywallIsAuto {
-                triggers.recordDismiss()
+            if !showing && !proStore.isPro {
+                triggers.recordPaywallDismissed(paywallIsAuto ? .automatic : .userInitiated)
             }
             if !showing { paywallIsAuto = false }
         }
