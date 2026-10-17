@@ -181,4 +181,32 @@ final class ListeningFlowTests: XCTestCase {
         XCTAssertFalse(session.library.userTakes.contains { $0.id == take.id })
         session.discardPending() // nothing held: harmless
     }
+
+    // MARK: - WAV only for takes that exist (F7.3)
+
+    func testFailedSessionLeavesNoWav() async {
+        let library = TakeLibrary()
+        let session = ListeningTestSupport.makeSession(library: library)
+        await ListeningTestSupport.startAndWait(session)
+        let wavsBefore = ListeningTestSupport.wavFileCount()
+
+        session.complete(notes: [], samples: [Float](repeating: 0.3, count: 22_050), durationS: 1)
+
+        if case .failed = session.phase {} else { XCTFail("expected .failed, got \(session.phase)") }
+        XCTAssertEqual(ListeningTestSupport.wavFileCount(), wavsBefore, "no take, so no WAV")
+    }
+
+    func testSavedTakeKeepsItsWav() async throws {
+        let library = TakeLibrary()
+        let session = ListeningTestSupport.makeSession(library: library)
+        await ListeningTestSupport.startAndWait(session)
+        let notes = [NoteEvent(onset: 0, offset: 0.5, midi: 60, velocity: 80)]
+
+        session.complete(notes: notes, samples: [Float](repeating: 0.3, count: 22_050), durationS: 1)
+
+        guard case .done(let take) = session.phase else { return XCTFail("expected .done, got \(session.phase)") }
+        defer { library.delete(take) }
+        let name = try XCTUnwrap(take.audioFileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: TakeLibrary.audioURL(fileName: name).path))
+    }
 }

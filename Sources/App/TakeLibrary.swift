@@ -88,7 +88,10 @@ final class TakeLibrary: ObservableObject {
             .sink { [weak self] in self?.isPlaying = $0 }
             .store(in: &cancellables)
         player.onFinished = { [weak self] in self?.player.stop() }
-        load()
+        // Sweep only after a clean load: an unreadable file means references are unknown.
+        if load() {
+            Self.sweepUnreferencedAudio(in: directory, keeping: Set(takes.compactMap(\.audioFileName)))
+        }
         Task { await self.loadSamples() }
     }
 
@@ -288,25 +291,42 @@ final class TakeLibrary: ObservableObject {
         init(from decoder: Decoder) throws { take = try? Take(from: decoder) }
     }
 
-    private func load() {
+    /// Loads takes.json. Returns true when the library is fully known (no file, or every element decoded).
+    @discardableResult
+    private func load() -> Bool {
         let url = storeURL
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
         guard let data = try? Data(contentsOf: url) else {
             preserveUnreadable(url, move: true)
             postNotice("Your saved takes could not be read. The file was kept as a backup.")
-            return
+            return false
         }
         guard let decoded = Self.decodeTakes(data) else {
             preserveUnreadable(url, move: true)
             postNotice("Your saved takes could not be read. The file was kept as a backup.")
-            return
+            return false
         }
         takes = decoded.takes
         if decoded.skipped > 0 {
             preserveUnreadable(url, move: false)
             postNotice("\(decoded.skipped) saved take\(decoded.skipped == 1 ? "" : "s") could not be read and "
                        + "\(decoded.skipped == 1 ? "was" : "were") skipped. A backup of the original file was kept.")
+            return false
         }
+        return true
+    }
+
+    /// Deletes session WAVs in `dir` that no take references (leftovers of failed or discarded sessions;
+    /// the folder is included in device backups). Returns how many files were removed.
+    @discardableResult
+    nonisolated static func sweepUnreferencedAudio(in dir: URL, keeping referenced: Set<String>) -> Int {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return 0 }
+        var removed = 0
+        for file in files where file.pathExtension.lowercased() == "wav" && !referenced.contains(file.lastPathComponent) {
+            if (try? fm.removeItem(at: file)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     /// Keeps the original bytes as takes.corrupt-<timestamp>.json before anything can overwrite them.
