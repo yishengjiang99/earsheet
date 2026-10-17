@@ -16,6 +16,7 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var isRestoring = false
     @State private var restoreNotice: String?
+    @State private var showManage = false
 
     static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     static let privacyURL = URL(string: "https://grepawk.com/music-radar/privacy")!
@@ -23,6 +24,9 @@ struct PaywallView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
+                if store.isPro {
+                    proState
+                } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header
@@ -71,6 +75,7 @@ struct PaywallView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
                 .background(.ultraThinMaterial)
+                }
             }
             .background(Ink.paper)
             .navigationBarTitleDisplayMode(.inline)
@@ -89,6 +94,7 @@ struct PaywallView: View {
                 selectDefaultPlan()
             }
             .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
+            .manageSubscriptionsSheet(isPresented: $showManage)
             .onChange(of: store.isPro) { wasPro, isPro in
                 // Ask to Buy approval, a restore elsewhere or a purchase all end here: close on the
                 // entitlement change, not on `purchase()`'s return value.
@@ -118,6 +124,28 @@ struct PaywallView: View {
 
     /// A restore result, or else the last purchase error / pending notice.
     private var alertMessage: String? { restoreNotice ?? store.purchaseError }
+
+    /// Shown instead of the plans and the buy CTA when the user already has Pro (no second purchase possible).
+    private var proState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "crown.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(Ink.teal)
+            Text("You're Pro")
+                .font(.system(.largeTitle, design: .serif))
+                .fontWeight(.bold)
+            Text("Unlimited saves and MIDI, MusicXML & full PDF export are unlocked. Thank you for supporting AI Music Radar.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Manage Subscription") { showManage = true }
+                .buttonStyle(.bordered)
+            Button("Done") { dismiss() }
+                .padding(.top, 4)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     // MARK: - Sections
 

@@ -3,12 +3,18 @@ import HearSheet
 import SwiftUI
 
 struct SettingsView: View {
+    /// Where the Go Pro row leads: Pro users manage their subscription and never see a buy CTA.
+    enum GoProRoute: Equatable { case paywall, manage }
+
+    static func goProRoute(isPro: Bool) -> GoProRoute { isPro ? .manage : .paywall }
+
     @ObservedObject var store: ProStore
     @ObservedObject private var push = PushManager.shared
     @State private var shareUsage = Telemetry.shared.isEnabled
     @State private var pushBusy = false
     @Environment(\.dismiss) private var dismiss
     @State private var showPaywall = false
+    @State private var showManage = false
     @State private var restoring = false
     @State private var restoreMessage: String?
     @AppStorage(NoiseGate.Settings.Keys.enabled) private var gateOn = NoiseGate.Settings.default.enabled
@@ -30,14 +36,19 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section {
-                    Button(action: { showPaywall = true }) {
+                    Button(action: {
+                        switch Self.goProRoute(isPro: store.isPro) {
+                        case .paywall: showPaywall = true
+                        case .manage: showManage = true
+                        }
+                    }) {
                         HStack {
                             Image(systemName: "crown.fill")
                                 .foregroundStyle(Ink.teal)
                             VStack(alignment: .leading) {
-                                Text("Go Pro")
+                                Text(store.isPro ? "AI Music Radar Pro" : "Go Pro")
                                     .fontWeight(.semibold)
-                                Text(store.isPro ? "You have Pro" : "Unlimited saves, MIDI, MusicXML & full PDF")
+                                Text(store.isPro ? "You have Pro. Tap to manage your subscription." : "Unlimited saves, MIDI, MusicXML & full PDF")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -166,6 +177,7 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .manageSubscriptionsSheet(isPresented: $showManage)
             .sheet(isPresented: $showPaywall) {
                 PaywallView(store: store, trigger: "settings")
             }
