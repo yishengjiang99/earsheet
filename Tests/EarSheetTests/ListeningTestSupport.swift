@@ -38,11 +38,13 @@ final class PermissionFlag: @unchecked Sendable {
 enum ListeningTestSupport {
     /// A session wired to a fake recorder, a granted/denied permission and no model.
     static func makeSession(recorder: FakeRecorder = FakeRecorder(), permission: PermissionFlag = PermissionFlag(true),
-                            library: TakeLibrary? = nil) -> ListeningSession {
+                            library: TakeLibrary? = nil,
+                            finalizeNotes: @escaping NoteFinalizer = ListeningSession.finalizeHeardNotes) -> ListeningSession {
         ListeningSession(library: library ?? TakeLibrary(), proStore: ProStore(), triggers: PaywallTriggers(),
                          recorder: recorder,
                          requestMicPermission: { permission.granted },
-                         loadModel: { nil })
+                         loadModel: { nil },
+                         finalizeNotes: finalizeNotes)
     }
 
     /// Starts the session and waits until warm-up finished.

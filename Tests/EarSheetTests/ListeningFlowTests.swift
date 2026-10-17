@@ -227,7 +227,7 @@ final class ListeningFlowTests: XCTestCase {
 
         XCTAssertEqual(session.phase, .writing, "the take is finalized, not left as a stale listening screen")
         XCTAssertEqual(recorder.stopCount, 1)
-        XCTAssertNotNil(session.notice, "the user is told why it ended")
+        XCTAssertNotNil(session.autoStopNotice, "the user is told why it ended")
 
         session.handleScenePhase(.background) // already finalizing: no second stop
         XCTAssertEqual(recorder.stopCount, 1)
@@ -259,5 +259,57 @@ final class ListeningFlowTests: XCTestCase {
         session.cancel()
         XCTAssertFalse(session.isPaused, "teardown clears the indicator")
         XCTAssertNil(recorder.onInterruption)
+    }
+
+    // MARK: - Limit notice delivery (F4.4)
+
+    private func waitUntilFinalized(_ session: ListeningSession) async {
+        for _ in 0..<80 {
+            if case .writing = session.phase { try? await Task.sleep(nanoseconds: 50_000_000) } else { return }
+        }
+    }
+
+    func testLimitNoticeIsDeliveredToPresenter() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lib-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let library = TakeLibrary(directory: dir)
+        let recorder = FakeRecorder()
+        recorder.samplesToReturn = [Float](repeating: 0.3, count: 22_050)
+        let session = ListeningTestSupport.makeSession(
+            recorder: recorder, library: library,
+            finalizeNotes: { _, _, _, _ in [NoteEvent(onset: 0, offset: 0.5, midi: 60, velocity: 80)] })
+        var delivered: (take: Take, notice: String?)?
+        session.onSaved = { take, notice in delivered = (take, notice) }
+        await ListeningTestSupport.startAndWait(session)
+
+        session.stop(dueToLimit: true)
+        await waitUntilFinalized(session)
+
+        let result = try XCTUnwrap(delivered, "the saved take is handed to the presenter")
+        defer { if let name = result.take.audioFileName { try? FileManager.default.removeItem(at: TakeLibrary.audioURL(fileName: name)) } }
+        let notice = try XCTUnwrap(result.notice, "with the reason it ended, because this screen closes on save")
+        XCTAssertTrue(notice.contains("\(Int(Transcriber.maxDurationSeconds))-second"))
+        XCTAssertNil(session.notice, "not shown in the session alert that is about to be torn down")
+        XCTAssertEqual(library.userTakes.count, 1)
+    }
+
+    func testPlainStopDeliversNoNotice() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lib-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let recorder = FakeRecorder()
+        recorder.samplesToReturn = [Float](repeating: 0.3, count: 22_050)
+        let session = ListeningTestSupport.makeSession(
+            recorder: recorder, library: TakeLibrary(directory: dir),
+            finalizeNotes: { _, _, _, _ in [NoteEvent(onset: 0, offset: 0.5, midi: 60, velocity: 80)] })
+        var delivered: (take: Take, notice: String?)?
+        session.onSaved = { take, notice in delivered = (take, notice) }
+        await ListeningTestSupport.startAndWait(session)
+
+        session.stop()
+        await waitUntilFinalized(session)
+
+        let result = try XCTUnwrap(delivered)
+        defer { if let name = result.take.audioFileName { try? FileManager.default.removeItem(at: TakeLibrary.audioURL(fileName: name)) } }
+        XCTAssertNil(result.notice)
     }
 }

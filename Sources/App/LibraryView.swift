@@ -26,6 +26,8 @@ struct LibraryView: View {
     /// Library > Take only: finished recordings and imports replace the path with their take.
     @State private var path: [Take] = []
     @State private var takeToOpen: Take?
+    /// Why the take ended on its own (60 s limit, app backgrounded); shown once the cover has closed.
+    @State private var pendingListeningNotice: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -152,12 +154,17 @@ struct LibraryView: View {
                 takeToOpen = nil
                 path = [take]
             }
+            if let message = pendingListeningNotice {
+                pendingListeningNotice = nil
+                library.postNotice(message)
+            }
         }) {
             if let session = listeningSession {
                 NavigationStack {
                     ListeningView(session: session, proStore: proStore, triggers: triggers,
-                                  onSaved: { take in
+                                  onSaved: { take, notice in
                                       takeToOpen = take
+                                      pendingListeningNotice = notice
                                       showListening = false
                                   })
                 }
