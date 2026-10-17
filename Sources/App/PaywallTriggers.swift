@@ -26,8 +26,19 @@ final class PaywallTriggers: ObservableObject {
     private let rank4ShownKey = "paywall.rank4Shown"
     private let rank4ReturnedKey = "paywall.rank4Returned"
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private var sessionCount = 0
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    /// How a paywall presentation started. Only automatic presentations count toward the
+    /// cooldown and the lifetime dismissal cap; taps (Keep it, locked rows, Settings) never do.
+    enum PresentationSource {
+        case automatic
+        case userInitiated
+    }
 
     /// Whether an automatic trigger may show now. Call `recordAutoShown()`
     /// when it does, `recordDismiss()` when the user dismisses.
@@ -60,6 +71,11 @@ final class PaywallTriggers: ObservableObject {
                 defaults.set(true, forKey: rank4ReturnedKey)
             }
         }
+    }
+
+    /// Call when the paywall closes without a purchase. Counts only for automatic presentations.
+    func recordPaywallDismissed(_ source: PresentationSource) {
+        if source == .automatic { recordDismiss() }
     }
 
     func recordDismiss() {
