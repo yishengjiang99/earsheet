@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import SwiftUI
 
+enum OnboardingCopy {
+    static let hearText = "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Your recordings never leave your phone."
+}
+
 /// First-launch onboarding: a 2-page swipe carousel explaining what the app
 /// does. Shown once (flag in UserDefaults); skippable.
 struct OnboardingView: View {
@@ -20,7 +24,7 @@ struct OnboardingView: View {
                 OnboardingPage(
                     art: AnyView(MicArt()),
                     title: "Hear the music.",
-                    text: "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Nothing ever leaves your phone."
+                    text: OnboardingCopy.hearText
                 ).tag(0)
                 OnboardingPage(
                     art: AnyView(PageArt()),
