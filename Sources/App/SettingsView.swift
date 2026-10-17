@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showPaywall = false
     @State private var restoring = false
+    @State private var restoreMessage: String?
     @AppStorage(NoiseGate.Settings.Keys.enabled) private var gateOn = NoiseGate.Settings.default.enabled
     @AppStorage(NoiseGate.Settings.Keys.thresholdDB) private var gateThreshold = NoiseGate.Settings.default.thresholdDB
     @AppStorage(NoiseGate.Settings.Keys.attackMs) private var gateAttackMs = NoiseGate.Settings.default.attack * 1000
@@ -47,11 +48,20 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    Button("Restore Purchases") {
+                    Button {
                         restoring = true
                         Task {
-                            await store.restore()
+                            let result = await store.restore()
                             restoring = false
+                            restoreMessage = result.message
+                        }
+                    } label: {
+                        HStack {
+                            Text(restoring ? "Restoring…" : "Restore Purchases")
+                            if restoring {
+                                Spacer()
+                                ProgressView()
+                            }
                         }
                     }
                     .disabled(restoring)
@@ -158,6 +168,14 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showPaywall) {
                 PaywallView(store: store)
+            }
+            .alert("Restore Purchases", isPresented: Binding(
+                get: { restoreMessage != nil },
+                set: { if !$0 { restoreMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(restoreMessage ?? "")
             }
         }
     }

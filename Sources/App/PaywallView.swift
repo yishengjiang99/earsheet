@@ -13,6 +13,7 @@ struct PaywallView: View {
     @State private var selectedID: String = ProStore.yearlyID
     @State private var isPurchasing = false
     @State private var isRestoring = false
+    @State private var restoreNotice: String?
 
     static let termsURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     static let privacyURL = URL(string: "https://grepawk.com/music-radar/privacy")!
@@ -58,7 +59,7 @@ struct PaywallView: View {
                         Task {
                             let result = await store.restore()
                             isRestoring = false
-                            if result == .restored { dismiss() }
+                            if result == .restored { dismiss() } else { restoreNotice = result.message }
                         }
                     }
                     .disabled(isRestoring || isPurchasing)
@@ -87,15 +88,18 @@ struct PaywallView: View {
             }
             .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
             .alert("AI Music Radar", isPresented: Binding(
-                get: { store.purchaseError != nil },
-                set: { if !$0 { store.purchaseError = nil } }
+                get: { alertMessage != nil },
+                set: { if !$0 { store.purchaseError = nil; restoreNotice = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(store.purchaseError ?? "")
+                Text(alertMessage ?? "")
             }
         }
     }
+
+    /// A restore result, or else the last purchase error / pending notice.
+    private var alertMessage: String? { restoreNotice ?? store.purchaseError }
 
     // MARK: - Sections
 

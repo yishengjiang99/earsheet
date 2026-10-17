@@ -31,7 +31,7 @@ final class RestoreFlowTests: XCTestCase {
         let store = ProStore(sync: { throw StoreKitError.networkError(URLError(.notConnectedToInternet)) })
         let result = await store.restore()
         XCTAssertEqual(result, .failed(StoreMessages.network))
-        XCTAssertEqual(store.purchaseError, StoreMessages.network)
+        XCTAssertNil(store.purchaseError, "the result carries the message; no stale paywall alert is left behind")
     }
 
     func testSyncUnknownFailureHasNoRawText() async {
@@ -39,6 +39,40 @@ final class RestoreFlowTests: XCTestCase {
         let store = ProStore(sync: { throw Raw() })
         let result = await store.restore()
         XCTAssertEqual(result, .failed(StoreMessages.restoreGeneric))
-        XCTAssertEqual(store.purchaseError, StoreMessages.restoreGeneric)
+        XCTAssertEqual(result.message, StoreMessages.restoreGeneric)
+        XCTAssertNil(store.purchaseError)
+    }
+
+    func testResultMessages() {
+        XCTAssertNil(RestoreResult.cancelled.message)
+        XCTAssertEqual(RestoreResult.none.message, RestoreResult.noneMessage)
+        XCTAssertEqual(RestoreResult.restored.message, RestoreResult.restoredMessage)
+        XCTAssertEqual(RestoreResult.failed("x").message, "x")
+    }
+
+    func testRestoreResults() async throws {
+        let session: SKTestSession
+        do {
+            session = try SKTestSession(contentsOf: PaywallPricingTests.storekitURL)
+        } catch {
+            throw XCTSkip("SKTestSession unavailable here: \(error)")
+        }
+        session.resetToDefaultState()
+        session.clearTransactions()
+        session.disableDialogs = true
+
+        let store = ProStore(sync: {})
+        await store.loadProducts(force: true)
+        guard let monthly = store.product(for: ProStore.monthlyID) else {
+            throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
+        }
+        let none = await store.restore()
+        XCTAssertEqual(none, .none, "a clean account has nothing to restore")
+        XCTAssertFalse(store.isPro)
+
+        let bought = await store.purchase(monthly)
+        XCTAssertTrue(bought)
+        let active = await store.restore()
+        XCTAssertEqual(active, .restored, "restore on an active Pro account reports success")
     }
 }
