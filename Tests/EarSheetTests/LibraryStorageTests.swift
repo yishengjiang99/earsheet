@@ -150,4 +150,29 @@ final class LibraryStorageTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("maybe-referenced.wav").path),
                       "references are unknown, so nothing is deleted")
     }
+
+    // MARK: - Default titles (F2.5)
+
+    func testDefaultTitleIsUniqueAfterDelete() throws {
+        let library = TakeLibrary(directory: try makeTempDirectory())
+        let score = makeTake("x").score
+        let first = library.addTake(score: score)
+        let second = library.addTake(score: score)
+        let third = library.addTake(score: score)
+        XCTAssertEqual([first.title, second.title, third.title], ["Take 1", "Take 2", "Take 3"])
+
+        library.delete(second)
+        let fourth = library.addTake(score: score)
+        XCTAssertEqual(fourth.title, "Take 4", "not a second \"Take 3\"")
+        XCTAssertEqual(Set(library.userTakes.map(\.title)).count, library.userTakes.count)
+
+        // The held-take path uses the same helper.
+        XCTAssertEqual(library.makeTake(score: score).title, "Take 5")
+    }
+
+    func testNextDefaultTitleIgnoresCustomTitles() {
+        XCTAssertEqual(TakeLibrary.nextDefaultTitle(among: []), "Take 1")
+        XCTAssertEqual(TakeLibrary.nextDefaultTitle(among: ["Moonlight", "Take 7", "Take x", "Take 2"]), "Take 8")
+        XCTAssertEqual(TakeLibrary.nextDefaultTitle(among: ["Take 9 (copy)"]), "Take 1")
+    }
 }
