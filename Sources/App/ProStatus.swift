@@ -59,6 +59,30 @@ struct ProStatus: Equatable {
     }
 }
 
+extension ProStatus {
+    /// Settings status line: "Pro Yearly · renews Nov 17", "Pro Monthly (trial) · ends Oct 24",
+    /// "Pro Yearly · expires Nov 17" (renewal switched off), "Lifetime Pro".
+    func statusLine(locale: Locale = .current, timeZone: TimeZone = .current) -> String {
+        guard plan != .lifetime else { return "Lifetime Pro" }
+        let name = isTrial ? "Pro \(planName) (trial)" : "Pro \(planName)"
+        guard let expiresAt else { return name }
+        let date = Self.formatDate(expiresAt, locale: locale, timeZone: timeZone)
+        if isTrial { return "\(name) · ends \(date)" }
+        switch willRenew {
+        case .some(true): return "\(name) · renews \(date)"
+        case .some(false): return "\(name) · expires \(date)"
+        case .none: return "\(name) · active until \(date)"
+        }
+    }
+}
+
+/// The quiet "Go Pro" entry in the Library toolbar: only for free users.
+enum LibraryGoProEntry {
+    static func isVisible(isPro: Bool) -> Bool { !isPro }
+    static let accessibilityLabel = "Go Pro"
+    static let accessibilityHint = "Shows Pro plans"
+}
+
 /// A Pro-only export the user tapped before the paywall: done once when Pro turns on.
 struct ExportResume: Equatable {
     private(set) var pending: ExportFormat?

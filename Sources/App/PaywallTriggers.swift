@@ -14,11 +14,12 @@ final class PaywallTriggers: ObservableObject {
         case thirdTranscription
         case settings
         case meter
+        case toolbar
 
         /// Triggers that fire without a tap on the paywall entry itself; these are capped.
         var isAutomatic: Bool {
             switch self {
-            case .exportLockedRow, .settings, .meter: return false
+            case .exportLockedRow, .settings, .meter, .toolbar: return false
             case .firstExport, .importLimit, .saveLimit, .thirdTranscription: return true
             }
         }
@@ -33,6 +34,7 @@ final class PaywallTriggers: ObservableObject {
             case .thirdTranscription: return "third_transcription"
             case .settings: return "settings"
             case .meter: return "meter"
+            case .toolbar: return "toolbar"
             }
         }
     }

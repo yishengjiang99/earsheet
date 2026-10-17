@@ -131,6 +131,16 @@ struct LibraryView: View {
                     .accessibilityLabel("Settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if LibraryGoProEntry.isVisible(isPro: proStore.isPro) {
+                        Button(action: openToolbarPlans) {
+                            Image(systemName: "crown")
+                        }
+                        .accessibilityLabel(LibraryGoProEntry.accessibilityLabel)
+                        .accessibilityHint(LibraryGoProEntry.accessibilityHint)
+                        .accessibilityIdentifier("library.goPro")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("Choose Audio or MIDI File") { showImporter = true }
                         Button("Choose Video from Photos") { showVideoPicker = true }
@@ -295,6 +305,13 @@ struct LibraryView: View {
         guard triggers.decision(.meter, userInitiated: true, context: promptContext).isShow else { return }
         Telemetry.shared.track(.softPromptTapped, ["kind": "meter"])
         presentPaywall(.meter, automatic: false)
+    }
+
+    /// The quiet toolbar "Go Pro": a tap, so user-initiated and never counted.
+    private func openToolbarPlans() {
+        guard triggers.decision(.toolbar, userInitiated: true, context: promptContext).isShow else { return }
+        Telemetry.shared.track(.softPromptTapped, ["kind": "toolbar"])
+        presentPaywall(.toolbar, automatic: false)
     }
 
     private func presentPaywall(_ trigger: PaywallTriggers.Trigger, automatic: Bool) {
