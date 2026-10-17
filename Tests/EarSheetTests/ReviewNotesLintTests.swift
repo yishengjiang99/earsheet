@@ -25,3 +25,26 @@ extension SettingsTests {
         XCTAssertFalse(lower.contains("full-length imports"))
     }
 }
+
+extension SettingsTests {
+    func testStoreMetadataDoesNotClaimLiveScoreWriting() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func read(_ name: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent("docs/asc/metadata/en-US/\(name).txt"),
+                       encoding: .utf8)
+        }
+        let subtitle = try read("subtitle").trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(subtitle, "Audio to Sheet Music, Offline")
+        XCTAssertLessThanOrEqual(subtitle.count, 30)
+        let promo = try read("promotional_text").trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertLessThanOrEqual(promo.count, 170)
+
+        for name in ["subtitle", "description", "promotional_text"] {
+            let text = try read(name).lowercased()
+            for banned in ["live audio", "score live", "writes the score", "real-time", "real time"] {
+                XCTAssertFalse(text.contains(banned), "\(name).txt contains \"\(banned)\"")
+            }
+        }
+    }
+}
