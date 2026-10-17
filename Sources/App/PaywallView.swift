@@ -89,6 +89,11 @@ struct PaywallView: View {
                 selectDefaultPlan()
             }
             .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
+            .onChange(of: store.isPro) { wasPro, isPro in
+                // Ask to Buy approval, a restore elsewhere or a purchase all end here: close on the
+                // entitlement change, not on `purchase()`'s return value.
+                if Self.shouldDismiss(wasPro: wasPro, isPro: isPro) { dismiss() }
+            }
             .onDisappear {
                 // Closing after a purchase is a conversion, not a dismissal.
                 if !store.isPro { Telemetry.shared.track(.paywallDismiss, triggerProperties) }
@@ -107,6 +112,9 @@ struct PaywallView: View {
     private var triggerProperties: [String: Any] {
         trigger.map { ["trigger": $0] } ?? [:]
     }
+
+    /// The paywall closes the moment Pro turns on while it is open.
+    static func shouldDismiss(wasPro: Bool, isPro: Bool) -> Bool { !wasPro && isPro }
 
     /// A restore result, or else the last purchase error / pending notice.
     private var alertMessage: String? { restoreNotice ?? store.purchaseError }
