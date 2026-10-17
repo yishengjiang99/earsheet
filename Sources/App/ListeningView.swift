@@ -35,6 +35,11 @@ final class ListeningSession: ObservableObject {
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var level: Float = 0
     @Published private(set) var notice: String?
+    /// Why the take ended on its own (60 s limit, app backgrounded). Delivered with the saved take
+    /// to the presenter (`onSaved`) because this screen closes as soon as the take is saved.
+    private(set) var autoStopNotice: String?
+    /// Called once when a take was saved to the library; the presenter closes this screen and opens it.
+    var onSaved: ((Take, String?) -> Void)?
     @Published var saveLimitReached = false
     /// True while a call/Siri interruption has the microphone: the timer is frozen, not broken.
     @Published private(set) var isPaused = false
@@ -48,6 +53,7 @@ final class ListeningSession: ObservableObject {
     private let recorder: Recording
     private let requestMicPermission: MicPermissionRequest
     private let loadModel: ModelLoader
+    private let finalizeNotes: NoteFinalizer
     /// The in-flight permission + warm-up task (tests await it).
     private(set) var startTask: Task<Void, Never>?
     private var streamer: StreamingTranscriber?
@@ -62,13 +68,15 @@ final class ListeningSession: ObservableObject {
     init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers,
          recorder: Recording = AudioRecorder(),
          requestMicPermission: @escaping MicPermissionRequest = ListeningSession.systemMicPermission,
-         loadModel: @escaping ModelLoader = ListeningSession.bundledModel) {
+         loadModel: @escaping ModelLoader = ListeningSession.bundledModel,
+         finalizeNotes: @escaping NoteFinalizer = ListeningSession.finalizeHeardNotes) {
         self.library = library
         self.proStore = proStore
         self.triggers = triggers
         self.recorder = recorder
         self.requestMicPermission = requestMicPermission
         self.loadModel = loadModel
+        self.finalizeNotes = finalizeNotes
     }
 
     /// Asks for the mic and starts warming up. Safe to call again from `.permissionDenied` (retry
@@ -201,9 +209,9 @@ final class ListeningSession: ObservableObject {
         canDebugExport = true
         switch reason {
         case .limit?:
-            notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
+            autoStopNotice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
         case .backgrounded?:
-            notice = "Listening stopped when you left the app — here is what was heard."
+            autoStopNotice = "Listening stopped when you left the app — here is what was heard."
         case nil:
             break
         }
@@ -211,18 +219,11 @@ final class ListeningSession: ObservableObject {
         let streamer = self.streamer
         let dropQuiet = InputConditioner.Settings.load().dropQuietNotes
         let gateThresholdDB = recorder.gateThresholdDB
+        let finalizer = finalizeNotes
         pumpQueue.async { [weak self] in
-            // Drain remaining audio including the final partial window,
-            // then finalize with the batch trim.
             let notes: [NoteEvent]
             do {
-                if let streamer { try streamer.finish() }
-                let heard = streamer?.finalize() ?? []
-                // Notes whose onset is below the gate (e.g. heard in residual AC noise) are dropped.
-                notes = dropQuiet
-                    ? InputConditioner.dropQuietNotes(heard, samples: samples, sampleRate: AudioRecorder.targetSampleRate,
-                                                      thresholdDB: gateThresholdDB)
-                    : heard
+                notes = try finalizer(streamer, samples, dropQuiet, gateThresholdDB)
             } catch {
                 Task { @MainActor [weak self] in
                     self?.phase = .failed("Could not write the page: \(error.localizedDescription)")
@@ -254,8 +255,14 @@ final class ListeningSession: ObservableObject {
             // Shown in place with a non-blocking "Not saved" banner (no alert or auto paywall over
             // the take); the paywall opens from the banner.
             holdTake(library.makeTake(score: score, events: notes, audioFileName: audioFileName))
+            notice = autoStopNotice // the held take stays on this screen, so show it here
+            autoStopNotice = nil
         } else {
-            phase = .done(library.addTake(score: score, events: notes, audioFileName: audioFileName))
+            let take = library.addTake(score: score, events: notes, audioFileName: audioFileName)
+            let message = autoStopNotice
+            autoStopNotice = nil
+            phase = .done(take)
+            onSaved?(take, message)
         }
     }
 
@@ -310,6 +317,7 @@ final class ListeningSession: ObservableObject {
         pendingTake = nil
         saveLimitReached = false
         notice = nil
+        autoStopNotice = nil
         liveNotes = []
         elapsed = 0
         level = 0
@@ -375,7 +383,7 @@ struct ListeningView: View {
     @ObservedObject var triggers: PaywallTriggers
     /// Called when the finished take is in the library: the presenter closes this screen and
     /// opens the take (Library > Take), so back never returns to listening.
-    var onSaved: ((Take) -> Void)? = nil
+    var onSaved: ((Take, String?) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmReRecord = false
@@ -434,14 +442,16 @@ struct ListeningView: View {
                 }
             }
         }
-        .onAppear { session.start() }
+        .onAppear {
+            session.onSaved = onSaved
+            session.start()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             session.handleScenePhase(newPhase)
             // Back from Settings after enabling the microphone: try again without leaving the screen.
             if newPhase == .active, session.phase == .permissionDenied { session.start() }
         }
         .onChange(of: session.phase) { _, phase in
-            if case .done(let take) = phase, !session.holdsPendingTake { onSaved?(take) }
             if case .cancelled = phase { dismiss() }
         }
         .confirmationDialog("This take isn't saved", isPresented: $confirmLeaveHeld, titleVisibility: .visible) {
@@ -482,7 +492,7 @@ struct ListeningView: View {
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, session.holdsPendingTake {
                 session.savePendingTake()
-                if case .done(let take) = session.phase { onSaved?(take) }
+                if case .done(let take) = session.phase { onSaved?(take, nil) }
             }
         }
     }

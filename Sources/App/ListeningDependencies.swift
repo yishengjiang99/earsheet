@@ -25,7 +25,23 @@ typealias MicPermissionRequest = @Sendable () async -> Bool
 /// transcription": samples are still recorded.
 typealias ModelLoader = @Sendable () async throws -> BasicPitchModel?
 
+/// Drains the streaming transcriber and returns the final notes for a finished take
+/// (streamer, samples, drop-quiet-notes setting, gate threshold in dB). Runs off the main actor.
+typealias NoteFinalizer = @Sendable (StreamingTranscriber?, [Float], Bool, Double) throws -> [NoteEvent]
+
 extension ListeningSession {
+    nonisolated static func finalizeHeardNotes(streamer: StreamingTranscriber?, samples: [Float],
+                                               dropQuiet: Bool, gateThresholdDB: Double) throws -> [NoteEvent] {
+        // Drain remaining audio including the final partial window, then finalize with the batch trim.
+        if let streamer { try streamer.finish() }
+        let heard = streamer?.finalize() ?? []
+        // Notes whose onset is below the gate (e.g. heard in residual AC noise) are dropped.
+        return dropQuiet
+            ? InputConditioner.dropQuietNotes(heard, samples: samples, sampleRate: AudioRecorder.targetSampleRate,
+                                              thresholdDB: gateThresholdDB)
+            : heard
+    }
+
     nonisolated static func systemMicPermission() async -> Bool {
         await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
