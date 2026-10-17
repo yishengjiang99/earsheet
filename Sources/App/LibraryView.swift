@@ -171,7 +171,7 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $showPaywall) {
-            PaywallView(store: proStore)
+            PaywallView(store: proStore, trigger: "saveLimit")
         }
         .onChange(of: showPaywall) { _, showing in
             if !showing && !proStore.isPro {

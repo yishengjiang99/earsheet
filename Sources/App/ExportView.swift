@@ -36,21 +36,17 @@ struct ExportView: View {
                         exportPhoto()
                     }
                 }
-                Section {
+                Section("Files") {
                     if take.audioFileName != nil {
-                        ExportRow(icon: "mic", title: "Mic audio",
-                                  subtitle: "What the mic heard (WAV)", locked: false) {
+                        ExportRow(icon: "mic", title: "Share recording (WAV)",
+                                  subtitle: "The audio of this take", locked: false) {
                             exportSessionAudio()
                         }
                     }
-                    ExportRow(icon: "list.bullet", title: "Note events",
-                              subtitle: "Transcribed array (JSON)", locked: false) {
+                    ExportRow(icon: "list.bullet", title: "Share notes (JSON)",
+                              subtitle: "The detected notes as a file", locked: false) {
                         exportNoteEvents()
                     }
-                } header: {
-                    Text("Session recording")
-                } footer: {
-                    Text("Debug export: the mic audio as the model heard it, plus the transcribed note array.")
                 }
                 Section {
                     ExportRow(icon: "music.note", title: "MIDI",
@@ -166,16 +162,16 @@ struct ExportView: View {
         shareFile(name: "\(baseName).png", data: png)
     }
 
-    // MARK: - Session recording (debug)
+    // MARK: - Recording and notes files
 
     private func exportSessionAudio() {
         guard let name = take.audioFileName else {
-            notice = "This take has no session audio."
+            notice = "This take has no recording."
             return
         }
         let url = TakeLibrary.audioURL(fileName: name)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            notice = "The session audio file is missing."
+            notice = "The recording file is missing."
             return
         }
         shareItems = [url]
@@ -184,9 +180,7 @@ struct ExportView: View {
 
     private func exportNoteEvents() {
         let json = SessionDebugExport.notesJSONString(notes: take.noteEvents)
-        UIPasteboard.general.string = json
         shareFile(name: "\(baseName)-notes.json", data: Data(json.utf8))
-        notice = "Note array copied to the clipboard — paste it into chat."
     }
 }
 

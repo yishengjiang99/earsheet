@@ -43,8 +43,6 @@ final class ListeningSession: ObservableObject {
     @Published var saveLimitReached = false
     /// True while a call/Siri interruption has the microphone: the timer is frozen, not broken.
     @Published private(set) var isPaused = false
-    /// True once there is recorded audio worth exporting (debug: PCM + note array).
-    @Published private(set) var canDebugExport = false
 
     let library: TakeLibrary
     private let proStore: ProStore
@@ -61,15 +59,15 @@ final class ListeningSession: ObservableObject {
     private var timer: Timer?
     /// True between a successful `recorder.start()` and the matching `stop()`.
     private var recorderRunning = false
-    /// Final PCM + note array stashed at stop(), for the debug export.
-    private var finalSamples: [Float] = []
-    private var finalNotes: [NoteEvent] = []
 
     init(library: TakeLibrary, proStore: ProStore, triggers: PaywallTriggers,
          recorder: Recording = AudioRecorder(),
-         requestMicPermission: @escaping MicPermissionRequest = ListeningSession.systemMicPermission,
-         loadModel: @escaping ModelLoader = ListeningSession.bundledModel,
-         finalizeNotes: @escaping NoteFinalizer = ListeningSession.finalizeHeardNotes) {
+         requestMicPermission: @escaping MicPermissionRequest = { await ListeningSession.systemMicPermission() },
+         loadModel: @escaping ModelLoader = { try await ListeningSession.bundledModel() },
+         finalizeNotes: @escaping NoteFinalizer = { streamer, samples, dropQuiet, gateDB in
+             try ListeningSession.finalizeHeardNotes(streamer: streamer, samples: samples,
+                                                     dropQuiet: dropQuiet, gateThresholdDB: gateDB)
+         }) {
         self.library = library
         self.proStore = proStore
         self.triggers = triggers
@@ -205,8 +203,6 @@ final class ListeningSession: ObservableObject {
             phase = .failed("Too quiet to transcribe. Try again, closer to the music.")
             return
         }
-        finalSamples = samples
-        canDebugExport = true
         switch reason {
         case .limit?:
             autoStopNotice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
@@ -242,7 +238,6 @@ final class ListeningSession: ObservableObject {
         let score = Quantizer.quantize(notes)
         Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": score.notes.isEmpty ? "no_notes" : "ok",
                                                     "duration_s": durationS, "notes": score.notes.count])
-        finalNotes = notes
         guard !score.notes.isEmpty else {
             phase = .failed("No notes found. Try again, closer to the music.")
             return
@@ -267,21 +262,6 @@ final class ListeningSession: ObservableObject {
     }
 
     func clearNotice() { notice = nil }
-
-    /// Shows a message in the session alert (used by the view for export feedback).
-    func postNotice(_ message: String) { notice = message }
-
-    /// PCM captured so far: the final take audio after stop(), live audio while listening.
-    var debugExportSamples: [Float] {
-        if !finalSamples.isEmpty { return finalSamples }
-        return recorder.currentSamples
-    }
-
-    /// Transcribed notes so far: the final array after stop(), live notes while listening.
-    var debugExportNotes: [NoteEvent] {
-        if !finalNotes.isEmpty { return finalNotes }
-        return liveNotes
-    }
 
     /// Seconds of audio after which Cancel asks before discarding.
     static let cancelConfirmSeconds = 5.0
@@ -322,9 +302,6 @@ final class ListeningSession: ObservableObject {
         elapsed = 0
         level = 0
         streamer = nil
-        finalSamples = []
-        finalNotes = []
-        canDebugExport = false
         phase = .preparing
         start()
     }
@@ -361,7 +338,6 @@ final class ListeningSession: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, case .listening = self.phase else { return }
                 self.elapsed = self.recorder.recordedSeconds
-                if self.elapsed > 0.5 { self.canDebugExport = true }
                 if self.elapsed >= Transcriber.maxDurationSeconds { self.stop(dueToLimit: true) }
             }
         }
@@ -389,8 +365,6 @@ struct ListeningView: View {
     @State private var confirmReRecord = false
     @State private var confirmCancel = false
     @State private var confirmLeaveHeld = false
-    @State private var debugShareItems: [Any] = []
-    @State private var showDebugShare = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -432,15 +406,6 @@ struct ListeningView: View {
                     }
                 }
             }
-            if showsDebugExport {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { exportDebugSession() }) {
-                        Label("Export", systemImage: "square.and.arrow.up")
-                    }
-                    .accessibilityLabel("Export session audio and notes")
-                    .accessibilityHint("Shares the mic recording as WAV and copies the note array as JSON")
-                }
-            }
         }
         .onAppear {
             session.onSaved = onSaved
@@ -479,10 +444,7 @@ struct ListeningView: View {
             Text(session.notice ?? "")
         }
         .sheet(isPresented: $session.saveLimitReached) {
-            PaywallView(store: proStore)
-        }
-        .sheet(isPresented: $showDebugShare) {
-            ShareSheet(items: debugShareItems)
+            PaywallView(store: proStore, trigger: "saveLimit")
         }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, session.holdsPendingTake {
@@ -566,39 +528,6 @@ struct ListeningView: View {
     private var showsHeldTake: Bool {
         if case .done = session.phase { return session.holdsPendingTake }
         return false
-    }
-
-    /// Debug export button: while there is recorded audio (listening, writing,
-    /// or a finished take), before the session screen goes away.
-    private var showsDebugExport: Bool {
-        guard session.canDebugExport else { return false }
-        switch session.phase {
-        case .listening, .writing, .done: return true
-        case .preparing, .permissionDenied, .cancelled, .failed: return false
-        }
-    }
-
-    /// Writes the session PCM as WAV and the note array as JSON, copies the
-    /// JSON to the clipboard for pasting, and opens the share sheet.
-    private func exportDebugSession() {
-        let samples = session.debugExportSamples
-        let notes = session.debugExportNotes
-        guard !samples.isEmpty else {
-            session.postNotice("Nothing recorded yet.")
-            return
-        }
-        do {
-            let tag = SessionDebugExport.fileTag()
-            let wavURL = try SessionDebugExport.writeWAV(samples: samples, tag: tag)
-            let jsonURL = try SessionDebugExport.writeNotesJSON(notes: notes, tag: tag)
-            UIPasteboard.general.string = SessionDebugExport.notesJSONString(notes: notes)
-            debugShareItems = [wavURL, jsonURL]
-            showDebugShare = true
-            session.postNotice("Note array copied to the clipboard — paste it here. " +
-                               "The WAV is the mic audio as the model heard it.")
-        } catch {
-            session.postNotice("Export failed: \(error.localizedDescription)")
-        }
     }
 
     /// No interstitial: a saved take closes this screen and opens in the library's stack

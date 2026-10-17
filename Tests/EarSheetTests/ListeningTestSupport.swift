@@ -39,12 +39,16 @@ enum ListeningTestSupport {
     /// A session wired to a fake recorder, a granted/denied permission and no model.
     static func makeSession(recorder: FakeRecorder = FakeRecorder(), permission: PermissionFlag = PermissionFlag(true),
                             library: TakeLibrary? = nil,
-                            finalizeNotes: @escaping NoteFinalizer = ListeningSession.finalizeHeardNotes) -> ListeningSession {
-        ListeningSession(library: library ?? TakeLibrary(), proStore: ProStore(), triggers: PaywallTriggers(),
-                         recorder: recorder,
-                         requestMicPermission: { permission.granted },
-                         loadModel: { nil },
-                         finalizeNotes: finalizeNotes)
+                            finalizeNotes: NoteFinalizer? = nil) -> ListeningSession {
+        let finalizer: NoteFinalizer = finalizeNotes ?? { streamer, samples, dropQuiet, gateDB in
+            try ListeningSession.finalizeHeardNotes(streamer: streamer, samples: samples,
+                                                    dropQuiet: dropQuiet, gateThresholdDB: gateDB)
+        }
+        return ListeningSession(library: library ?? TakeLibrary(), proStore: ProStore(), triggers: PaywallTriggers(),
+                                recorder: recorder,
+                                requestMicPermission: { permission.granted },
+                                loadModel: { nil },
+                                finalizeNotes: finalizer)
     }
 
     /// Starts the session and waits until warm-up finished.
