@@ -18,7 +18,11 @@ struct LibraryView: View {
     @State private var importState = ImportCoordinator()
     @State private var showPaywall = false
     @State private var showSettings = false
-    @State private var pendingScore: (score: QuantizedScore, title: String?, events: [NoteEvent])?
+    /// An import held by the free save limit: shown as Library > Take with a "Not saved yet" banner.
+    @State private var heldImport = HeldImport()
+    @State private var confirmLeaveHeld = false
+    /// True while the paywall sheet was opened automatically (counts toward the dismissal caps).
+    @State private var paywallIsAuto = false
     /// Library > Take only: finished recordings and imports replace the path with their take.
     @State private var path: [Take] = []
     @State private var takeToOpen: Take?
@@ -99,7 +103,11 @@ struct LibraryView: View {
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
-                SheetDetailView(take: take, library: library, proStore: proStore, onRecord: startListening)
+                if heldImport.isHeld(take) {
+                    heldDetail(take)
+                } else {
+                    SheetDetailView(take: take, library: library, proStore: proStore, onRecord: startListening)
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -159,20 +167,24 @@ struct LibraryView: View {
             PaywallView(store: proStore)
         }
         .onChange(of: showPaywall) { _, showing in
-            if !showing && !proStore.isPro {
+            if !showing && !proStore.isPro && paywallIsAuto {
                 triggers.recordDismiss()
             }
+            if !showing { paywallIsAuto = false }
         }
         .onChange(of: proStore.isPro) { _, isPro in
-            if isPro, let pending = pendingScore {
-                pendingScore = nil
+            if isPro, let held = heldImport.release() {
                 showPaywall = false
-                if let title = pending.title {
-                    open(library.addTake(title: title, score: pending.score, events: pending.events))
-                } else {
-                    open(library.addTake(score: pending.score, events: pending.events))
-                }
+                library.importTake(held)
+                open(library.current(held))
             }
+        }
+        .confirmationDialog("This piece isn't saved", isPresented: $confirmLeaveHeld, titleVisibility: .visible) {
+            Button("Discard", role: .destructive, action: discardHeldImport)
+            Button("Keep it with Pro") { showPaywall = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Free keeps \(ProStore.freeSaveLimit) pieces. Leaving now discards this one.")
         }
         .overlay { importOverlay }
         .alert("AI Music Radar", isPresented: Binding(
@@ -210,6 +222,30 @@ struct LibraryView: View {
         importState.cancel()
     }
 
+    /// A held import, shown in place like a held mic take: banner with "Keep it", and a
+    /// Discard / Keep / Cancel choice instead of a silent back.
+    private func heldDetail(_ take: Take) -> some View {
+        SheetDetailView(take: take, library: library, proStore: proStore,
+                        onRecord: { confirmLeaveHeld = true })
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HeldTakeBanner { showPaywall = true }
+            }
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { confirmLeaveHeld = true }) {
+                        Label("Sheets", systemImage: "chevron.left")
+                            .labelStyle(.titleAndIcon)
+                    }
+                }
+            }
+    }
+
+    private func discardHeldImport() {
+        if let held = heldImport.discard() { library.discardHeld(held) }
+        path = []
+    }
+
     /// Shows `take` as Library > Take (replaces any open take).
     private func open(_ take: Take) {
         path = [take]
@@ -236,12 +272,17 @@ struct LibraryView: View {
     @discardableResult
     private func saveImportedScore(_ score: QuantizedScore, title: String? = nil, events: [NoteEvent]) -> SaveDecision {
         if SaveGate.decision(isPro: proStore.isPro, savedCount: library.userTakes.count) == .held {
-            pendingScore = (score, title, events)
+            let take = library.makeTake(title: title, score: score, events: events)
+            library.hold(take)
+            if case .replaced(let previous) = heldImport.hold(take) {
+                library.discardHeld(previous)
+                library.postNotice("Your earlier unsaved piece \"\(previous.title)\" was replaced by this one.")
+            }
+            open(take)
             if triggers.canShowAuto(.saveLimit) {
                 triggers.recordAutoShown(.saveLimit)
+                paywallIsAuto = true
                 showPaywall = true
-            } else {
-                library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
             }
             return .held
         } else if let title {

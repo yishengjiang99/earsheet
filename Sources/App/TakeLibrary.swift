@@ -90,18 +90,36 @@ final class TakeLibrary: ObservableObject {
 
     var userTakes: [Take] { takes }
 
+    /// Builds a take (default title included) without adding it to the library.
+    func makeTake(title: String? = nil, score: QuantizedScore, events: [NoteEvent]? = nil,
+                  audioFileName: String? = nil) -> Take {
+        Take(id: UUID(),
+             title: title ?? "Take \(takes.count + 1)",
+             createdAt: Date(),
+             score: score,
+             isSample: false,
+             events: events,
+             audioFileName: audioFileName)
+    }
+
     func addTake(title: String? = nil, score: QuantizedScore, events: [NoteEvent]? = nil,
                  audioFileName: String? = nil) -> Take {
-        let take = Take(id: UUID(),
-                        title: title ?? "Take \(takes.count + 1)",
-                        createdAt: Date(),
-                        score: score,
-                        isSample: false,
-                        events: events,
-                        audioFileName: audioFileName)
+        let take = makeTake(title: title, score: score, events: events, audioFileName: audioFileName)
         takes.insert(take, at: 0)
         save()
         return take
+    }
+
+    /// Registers a take held by the free save limit so views can show and analyze it
+    /// without it being in My Takes (`importTake` saves it after an upgrade).
+    func hold(_ take: Take) { looseTakes[take.id] = take }
+
+    /// Drops a held take (and its session audio, if any) without saving it.
+    func discardHeld(_ take: Take) {
+        looseTakes.removeValue(forKey: take.id)
+        if let name = take.audioFileName {
+            try? FileManager.default.removeItem(at: Self.audioURL(fileName: name))
+        }
     }
 
     /// Analysis state for takes not in the library (e.g. one held by the free save limit).
