@@ -71,4 +71,53 @@ final class QuotaGateTests: XCTestCase {
         XCTAssertTrue(text.contains("ImportPolicy.benefitText"))
         XCTAssertTrue(text.contains("feature: \"Import length\", free: ImportPolicy.comparisonFree, pro: ImportPolicy.comparisonPro"))
     }
+
+    // MARK: - Held imports (F9.5)
+
+    private func makeTake(_ title: String) -> Take {
+        let events = [NoteEvent(onset: 0, offset: 0.5, midi: 60, velocity: 80)]
+        return Take(id: UUID(), title: title, createdAt: Date(), score: Quantizer.quantize(events),
+                    isSample: false, events: events)
+    }
+
+    func testHeldImportIsVisibleAndNotReplacedSilently() {
+        var held = HeldImport()
+        XCTAssertFalse(held.isHolding)
+
+        let first = makeTake("Take 4")
+        XCTAssertEqual(held.hold(first), .held)
+        XCTAssertTrue(held.isHolding)
+        XCTAssertTrue(held.isHeld(first), "the held piece is the one the library screen shows")
+        XCTAssertFalse(held.isHeld(makeTake("Other")))
+
+        // A newer hold reports what it replaced so the caller can warn; never silent.
+        let second = makeTake("Take 5")
+        XCTAssertEqual(held.hold(second), .replaced(previous: first))
+        XCTAssertTrue(held.isHeld(second))
+        XCTAssertFalse(held.isHeld(first))
+
+        // Discard clears the hold and hands back the take (so its files can be removed).
+        XCTAssertEqual(held.discard()?.id, second.id)
+        XCTAssertFalse(held.isHolding)
+        XCTAssertNil(held.discard())
+    }
+
+    func testHeldImportReleaseOnUpgradeSavesOnce() {
+        var held = HeldImport()
+        let take = makeTake("Take 4")
+        _ = held.hold(take)
+        XCTAssertEqual(held.release()?.id, take.id)
+        XCTAssertNil(held.release(), "released exactly once")
+    }
+
+    func testHeldTakeIsRegisteredWithoutEnteringMyTakes() {
+        let library = TakeLibrary()
+        let before = library.userTakes.count
+        let take = makeTake("Held")
+        library.hold(take)
+        XCTAssertEqual(library.userTakes.count, before, "a held take is not in My Takes")
+        XCTAssertEqual(library.current(take).id, take.id)
+        library.discardHeld(take)
+        XCTAssertEqual(library.userTakes.count, before)
+    }
 }

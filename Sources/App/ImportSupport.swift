@@ -90,3 +90,35 @@ struct ImportCoordinator: Equatable {
         ImportErrorMessage.emptyAudio(source)
     }
 }
+
+/// The one imported piece held by the free save limit (shown on screen with the "Not saved yet"
+/// banner). A newer hold never replaces it silently: `hold` returns the previous take so the
+/// caller can warn the user.
+struct HeldImport: Equatable {
+    enum HoldResult: Equatable {
+        case held
+        case replaced(previous: Take)
+    }
+
+    private(set) var take: Take?
+
+    var isHolding: Bool { take != nil }
+
+    func isHeld(_ candidate: Take) -> Bool { take?.id == candidate.id }
+
+    mutating func hold(_ new: Take) -> HoldResult {
+        let previous = take
+        take = new
+        if let previous { return .replaced(previous: previous) }
+        return .held
+    }
+
+    /// The user discarded it.
+    mutating func discard() -> Take? {
+        defer { take = nil }
+        return take
+    }
+
+    /// The user upgraded: hand the take over to be saved.
+    mutating func release() -> Take? { discard() }
+}
