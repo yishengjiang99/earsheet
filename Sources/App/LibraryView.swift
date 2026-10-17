@@ -286,7 +286,7 @@ struct LibraryView: View {
                 // Superseded by a newer import; stay silent.
             } catch {
                 try? FileManager.default.removeItem(at: url)
-                library.postNotice("Could not read that video's audio.")
+                library.postNotice(ImportErrorMessage.message(for: error, source: .video))
             }
         }
     }
@@ -318,7 +318,7 @@ struct LibraryView: View {
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
             } catch {
-                library.postNotice("Could not read that audio file.")
+                library.postNotice(ImportErrorMessage.message(for: error, source: .audio))
             }
         }
     }
