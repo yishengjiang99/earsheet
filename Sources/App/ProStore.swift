@@ -43,8 +43,11 @@ final class ProStore: ObservableObject {
     private var updatesTask: Task<Void, Never>?
     private var expiryTask: Task<Void, Never>?
     private var cache = EntitlementCache()
+    private let sync: () async throws -> Void
 
-    init() {
+    /// `sync` is `AppStore.sync()` in production; tests inject a closure that throws.
+    init(sync: @escaping () async throws -> Void = { try await AppStore.sync() }) {
+        self.sync = sync
         isPro = cache.isPro
         updatesTask = Task { [weak self] in
             await self?.listenForTransactions()
@@ -78,7 +81,7 @@ final class ProStore: ObservableObject {
                 productsError = "Prices aren't available right now. Check your connection and try again."
             }
         } catch {
-            productsError = "Couldn't load prices: \(error.localizedDescription)"
+            productsError = StoreMessages.loadPricesFailure(error)
         }
     }
 
@@ -135,31 +138,39 @@ final class ProStore: ObservableObject {
                 return false
             }
         } catch {
-            purchaseError = "Purchase failed: \(error.localizedDescription)"
-            // StoreKit error code only, never the message text.
-            Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "error",
-                                                   "code": (error as NSError).code])
+            if StoreMessages.isUserCancel(error) {
+                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "cancelled"])
+                return false
+            }
+            purchaseError = StoreMessages.purchaseFailure(error)
+            Telemetry.shared.track(.purchaseFail, StoreMessages.failureProperties(error, productID: product.id))
             return false
         }
     }
 
     /// Restore: sync with the App Store, then refresh from current entitlements.
-    func restore() async -> Bool {
+    /// A user cancel of the App Store sign-in prompt is silent (`.cancelled`, no alert).
+    @discardableResult
+    func restore() async -> RestoreResult {
         purchaseError = nil
         do {
-            try await AppStore.sync()
+            try await sync()
         } catch {
-            purchaseError = "Restore failed: \(error.localizedDescription)"
+            if StoreMessages.isUserCancel(error) {
+                Telemetry.shared.track(.restore, ["result": "cancelled"])
+                return .cancelled
+            }
+            let message = StoreMessages.restoreFailure(error)
+            purchaseError = message
             Telemetry.shared.track(.restore, ["result": "fail", "code": (error as NSError).code])
-            return false
+            return .failed(message)
         }
         let restored = await reportCurrentEntitlements()
         await refreshEntitlement()
         Telemetry.shared.track(.restore, ["result": isPro ? "success" : "none", "restored": restored])
-        if !isPro {
-            purchaseError = "No Pro purchase found on this Apple ID."
-        }
-        return isPro
+        if isPro { return .restored }
+        purchaseError = "No Pro purchase found on this Apple ID."
+        return .none
     }
 
     // MARK: - Entitlement
@@ -242,8 +253,71 @@ final class ProStore: ObservableObject {
     var appAccountToken: UUID { InstallIdentity.appAccountToken }
 }
 
-enum ProStoreError: Error {
+/// Outcome of `ProStore.restore()`.
+enum RestoreResult: Equatable {
+    /// Pro is active after the sync (found a purchase, or Pro was already active).
+    case restored
+    /// The sync worked but this Apple ID has no Pro purchase.
+    case none
+    /// The user dismissed the App Store sign-in prompt: show nothing.
+    case cancelled
+    /// Plain-language, retryable message.
+    case failed(String)
+}
+
+enum ProStoreError: Error, LocalizedError {
     case unverifiedTransaction
+
+    var errorDescription: String? {
+        switch self {
+        case .unverifiedTransaction: return StoreMessages.unverified
+        }
+    }
+}
+
+/// Plain-language copy for StoreKit failures. Raw `Error` text (e.g. "The operation couldn't be
+/// completed (EarSheet.ProStoreError error 0)") is never shown to the user or sent to analytics.
+enum StoreMessages {
+    static let unverified = "We couldn't verify this purchase with the App Store. If you were charged, tap Restore Purchases."
+    static let network = "Couldn't reach the App Store. Check your connection and try again."
+    static let purchaseGeneric = "Purchase didn't go through. Try again."
+    static let purchaseNotAllowed = "Purchases are turned off on this device (Screen Time or parental controls)."
+    static let restoreGeneric = "Couldn't restore purchases. Try again in a moment."
+    static let pricesNetwork = "Couldn't load prices. Check your connection and try again."
+
+    static func isUserCancel(_ error: Error) -> Bool {
+        if let sk = error as? StoreKitError, case .userCancelled = sk { return true }
+        return false
+    }
+
+    static func isNetwork(_ error: Error) -> Bool {
+        if let sk = error as? StoreKitError, case .networkError = sk { return true }
+        return error is URLError
+    }
+
+    static func purchaseFailure(_ error: Error) -> String {
+        if let e = error as? ProStoreError, e == .unverifiedTransaction { return unverified }
+        if isNetwork(error) { return network }
+        if let e = error as? Product.PurchaseError, case .purchaseNotAllowed = e { return purchaseNotAllowed }
+        return purchaseGeneric
+    }
+
+    static func restoreFailure(_ error: Error) -> String {
+        isNetwork(error) ? network : restoreGeneric
+    }
+
+    static func loadPricesFailure(_ error: Error) -> String {
+        isNetwork(error) ? pricesNetwork : "Prices aren't available right now. Try again in a moment."
+    }
+
+    /// Analytics properties for a real purchase failure: a fixed reason plus the numeric error code, never message text.
+    static func failureProperties(_ error: Error, productID: String) -> [String: Any] {
+        if let e = error as? ProStoreError, e == .unverifiedTransaction {
+            return ["product": productID, "reason": "unverified"]
+        }
+        if isNetwork(error) { return ["product": productID, "reason": "network"] }
+        return ["product": productID, "reason": "error", "code": (error as NSError).code]
+    }
 }
 
 // MARK: - Local entitlement cache
