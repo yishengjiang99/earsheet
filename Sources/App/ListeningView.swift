@@ -15,12 +15,13 @@ final class ListeningSession: ObservableObject {
         case writing
         case done(Take)
         case permissionDenied
+        case cancelled
         case failed(String)
 
         static func == (lhs: Phase, rhs: Phase) -> Bool {
             switch (lhs, rhs) {
             case (.preparing, .preparing), (.listening, .listening), (.writing, .writing),
-                 (.permissionDenied, .permissionDenied):
+                 (.permissionDenied, .permissionDenied), (.cancelled, .cancelled):
                 true
             case (.done(let a), .done(let b)): a.id == b.id
             case (.failed(let a), .failed(let b)): a == b
@@ -80,10 +81,12 @@ final class ListeningSession: ObservableObject {
             guard let self else { return }
             defer { self.startTask = nil }
             let granted = await self.requestMicPermission()
+            guard self.phase != .cancelled else { return }
             guard granted else {
                 self.phase = .permissionDenied
                 return
             }
+            self.phase = .preparing // retry after .permissionDenied: warm up again
             await self.begin()
         }
     }
@@ -92,6 +95,7 @@ final class ListeningSession: ObservableObject {
         // Load the model before opening the mic; inference must keep up live.
         do {
             let model = try await loadModel()
+            guard case .preparing = phase else { return } // cancelled while warming up
             let streamer = model.map { StreamingTranscriber(model: $0) }
             self.streamer = streamer
             let queue = self.pumpQueue
@@ -243,6 +247,31 @@ final class ListeningSession: ObservableObject {
         return liveNotes
     }
 
+    /// Seconds of audio after which Cancel asks before discarding.
+    static let cancelConfirmSeconds = 5.0
+
+    /// True when Cancel should confirm first (more than a few seconds were captured).
+    var needsCancelConfirmation: Bool {
+        if case .listening = phase { return elapsed > Self.cancelConfirmSeconds }
+        return false
+    }
+
+    /// Abandons the session while warming up or listening: stops the mic and drops the audio.
+    /// Nothing is saved or written to disk (no take, no WAV).
+    func cancel() {
+        switch phase {
+        case .preparing, .listening: break
+        default: return
+        }
+        startTask?.cancel()
+        teardownRecording()
+        streamer = nil
+        liveNotes = []
+        elapsed = 0
+        level = 0
+        phase = .cancelled
+    }
+
     /// Records again in place (re-record from a held take): the unsaved take is discarded.
     func restart() {
         teardownRecording()
@@ -307,6 +336,7 @@ struct ListeningView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmReRecord = false
+    @State private var confirmCancel = false
     @State private var debugShareItems: [Any] = []
     @State private var showDebugShare = false
 
@@ -323,6 +353,8 @@ struct ListeningView: View {
                 doneBody(take: take)
             case .permissionDenied:
                 permissionDeniedBody
+            case .cancelled:
+                Color.clear
             case .failed(let message):
                 failedBody(message: message)
             }
@@ -331,6 +363,15 @@ struct ListeningView: View {
         .background(Ink.paper)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if showsCancel {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        if session.needsCancelConfirmation { confirmCancel = true } else { session.cancel() }
+                    }
+                    .accessibilityIdentifier("listening.cancel")
+                    .accessibilityHint("Stops listening and discards the recording")
+                }
+            }
             if showsHeldTake {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: { dismiss() }) {
@@ -356,6 +397,13 @@ struct ListeningView: View {
         }
         .onChange(of: session.phase) { _, phase in
             if case .done(let take) = phase, !session.holdsPendingTake { onSaved?(take) }
+            if case .cancelled = phase { dismiss() }
+        }
+        .confirmationDialog("Discard this recording?", isPresented: $confirmCancel, titleVisibility: .visible) {
+            Button("Discard recording", role: .destructive) { session.cancel() }
+            Button("Keep listening", role: .cancel) {}
+        } message: {
+            Text("Nothing will be saved.")
         }
         .alert("AI Music Radar", isPresented: Binding(
             get: { session.notice != nil },
@@ -440,6 +488,14 @@ struct ListeningView: View {
         }
     }
 
+    /// Cancel is offered while warming up and while listening (not once the take is being written).
+    private var showsCancel: Bool {
+        switch session.phase {
+        case .preparing, .listening: return true
+        default: return false
+        }
+    }
+
     private var showsHeldTake: Bool {
         if case .done = session.phase { return session.holdsPendingTake }
         return false
@@ -451,7 +507,7 @@ struct ListeningView: View {
         guard session.canDebugExport else { return false }
         switch session.phase {
         case .listening, .writing, .done: return true
-        case .preparing, .permissionDenied, .failed: return false
+        case .preparing, .permissionDenied, .cancelled, .failed: return false
         }
     }
 

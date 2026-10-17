@@ -49,4 +49,11 @@ enum ListeningTestSupport {
         session.start()
         await session.startTask?.value
     }
+
+    /// Number of .wav files in the library's audio directory (the default Application Support one).
+    static func wavFileCount() -> Int {
+        let dir = TakeLibrary.audioURL(fileName: "probe.wav").deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { $0.hasSuffix(".wav") }.count
+    }
 }
