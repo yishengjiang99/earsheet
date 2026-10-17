@@ -156,4 +156,29 @@ final class ListeningFlowTests: XCTestCase {
         session.cancel()
         XCTAssertFalse(session.needsCancelConfirmation)
     }
+
+    // MARK: - Held take discard (F5.6)
+
+    func testDiscardPendingRemovesAudioAndClearsHold() throws {
+        let session = ListeningTestSupport.makeSession()
+        let name = try XCTUnwrap(SessionDebugExport.persistSessionAudio([Float](repeating: 0.2, count: 2_205)))
+        let url = TakeLibrary.audioURL(fileName: name)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let events = [NoteEvent(onset: 0, offset: 0.5, midi: 60, velocity: 80)]
+        let take = Take(id: UUID(), title: "Held", createdAt: Date(), score: Quantizer.quantize(events),
+                        isSample: false, events: events, audioFileName: name)
+        session.holdTake(take)
+        XCTAssertTrue(session.holdsPendingTake)
+        XCTAssertEqual(session.phase, .done(take))
+        XCTAssertFalse(session.library.userTakes.contains { $0.id == take.id }, "a held take is not in My Takes")
+
+        session.discardPending()
+
+        XCTAssertFalse(session.holdsPendingTake)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "the held take's WAV is deleted")
+        XCTAssertFalse(session.library.userTakes.contains { $0.id == take.id })
+        session.discardPending() // nothing held: harmless
+    }
 }
