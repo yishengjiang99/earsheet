@@ -20,6 +20,7 @@ struct LibraryView: View {
     @State private var paywallTrigger: PaywallTriggers.Trigger = .saveLimit
     @State private var showThirdTakeCard = false
     @State private var thirdTakeCardChecked = false
+    @State private var proBanner: String?
     @StateObject private var importGate = ImportLimitGate()
     @State private var showSettings = false
     /// An import held by the free save limit: shown as Library > Take with a "Not saved yet" banner.
@@ -112,6 +113,7 @@ struct LibraryView: View {
                 }
                 .padding(.bottom, 28)
             }
+            .proConfirmationBanner($proBanner)
             .navigationTitle("Sheets")
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: Take.self) { take in
@@ -199,6 +201,9 @@ struct LibraryView: View {
         .onChange(of: showListening) { _, _ in refreshThirdTakeCard() }
         .onChange(of: path) { _, _ in refreshThirdTakeCard() }
         .onChange(of: proStore.isPro) { _, isPro in
+            if isPro && showPaywall {
+                proBanner = proStore.proStatus?.confirmation() ?? "Pro is on."
+            }
             if isPro, let held = heldImport.release() {
                 showPaywall = false
                 library.importTake(held)

@@ -33,6 +33,8 @@ final class ProStore: ObservableObject {
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var isPro: Bool = false
+    /// Plan, trial and end date of the current entitlement (nil when not Pro or not yet read).
+    @Published private(set) var proStatus: ProStatus?
     @Published private(set) var isLoadingProducts = false
     /// Shown on the paywall (with a Try Again button) when prices could not be loaded or came back empty.
     @Published private(set) var productsError: String?
@@ -190,18 +192,50 @@ final class ProStore: ObservableObject {
     func refreshEntitlement() async {
         var pro = false
         var earliestExpiry: Date?
+        var current: [ProStatus] = []
         for await result in Transaction.currentEntitlements {
             guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
             pro = true
             if let expiry = transaction.expirationDate {
                 earliestExpiry = earliestExpiry.map { min($0, expiry) } ?? expiry
             }
+            if let plan = ProStatus.plan(forProductID: transaction.productID) {
+                current.append(ProStatus(plan: plan, expiresAt: transaction.expirationDate,
+                                         isTrial: transaction.offerType == .introductory, willRenew: nil))
+            }
         }
+        var status = pro ? ProStatus.best(current) : nil
+        if var known = status, known.plan == proStatus?.plan, known.expiresAt == proStatus?.expiresAt {
+            known.willRenew = proStatus?.willRenew
+            status = known
+        }
+        proStatus = status
         isPro = pro
+        if let status, status.plan != .lifetime, status.willRenew == nil {
+            Task { [weak self] in await self?.refineRenewal(for: status) }
+        }
         if pro { purchasePendingApproval = false }
         cache.isPro = pro
         cache.lastRefresh = Date()
         scheduleExpiryRefresh(at: pro ? earliestExpiry : nil)
+    }
+
+    /// Fills in whether the subscription will auto-renew (StoreKit renewal info) once it is known.
+    private func refineRenewal(for status: ProStatus) async {
+        let productID = status.plan == .yearly ? Self.yearlyID : Self.monthlyID
+        var product = self.product(for: productID)
+        if product == nil {
+            product = (try? await Product.products(for: [productID]))?.first
+        }
+        guard let subscription = product?.subscription,
+              let statuses = try? await subscription.status else { return }
+        for subscriptionStatus in statuses {
+            guard case .verified(let info) = subscriptionStatus.renewalInfo else { continue }
+            guard var latest = proStatus, latest.plan == status.plan, latest.expiresAt == status.expiresAt else { return }
+            latest.willRenew = info.willAutoRenew
+            proStatus = latest
+            return
+        }
     }
 
     /// Seconds to wait before re-checking entitlements for a subscription that expires at `expiry`.
