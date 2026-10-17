@@ -43,8 +43,11 @@ final class ProStore: ObservableObject {
     private var updatesTask: Task<Void, Never>?
     private var expiryTask: Task<Void, Never>?
     private var cache = EntitlementCache()
+    private let sync: () async throws -> Void
 
-    init() {
+    /// `sync` is `AppStore.sync()` in production; tests inject a closure that throws.
+    init(sync: @escaping () async throws -> Void = { try await AppStore.sync() }) {
+        self.sync = sync
         isPro = cache.isPro
         updatesTask = Task { [weak self] in
             await self?.listenForTransactions()
@@ -146,22 +149,28 @@ final class ProStore: ObservableObject {
     }
 
     /// Restore: sync with the App Store, then refresh from current entitlements.
-    func restore() async -> Bool {
+    /// A user cancel of the App Store sign-in prompt is silent (`.cancelled`, no alert).
+    @discardableResult
+    func restore() async -> RestoreResult {
         purchaseError = nil
         do {
-            try await AppStore.sync()
+            try await sync()
         } catch {
-            purchaseError = StoreMessages.restoreFailure(error)
+            if StoreMessages.isUserCancel(error) {
+                Telemetry.shared.track(.restore, ["result": "cancelled"])
+                return .cancelled
+            }
+            let message = StoreMessages.restoreFailure(error)
+            purchaseError = message
             Telemetry.shared.track(.restore, ["result": "fail", "code": (error as NSError).code])
-            return false
+            return .failed(message)
         }
         let restored = await reportCurrentEntitlements()
         await refreshEntitlement()
         Telemetry.shared.track(.restore, ["result": isPro ? "success" : "none", "restored": restored])
-        if !isPro {
-            purchaseError = "No Pro purchase found on this Apple ID."
-        }
-        return isPro
+        if isPro { return .restored }
+        purchaseError = "No Pro purchase found on this Apple ID."
+        return .none
     }
 
     // MARK: - Entitlement
@@ -242,6 +251,18 @@ final class ProStore: ObservableObject {
     /// Per-install token sent with every purchase so the server can link
     /// transactions to this install. Generated once, stored in UserDefaults.
     var appAccountToken: UUID { InstallIdentity.appAccountToken }
+}
+
+/// Outcome of `ProStore.restore()`.
+enum RestoreResult: Equatable {
+    /// Pro is active after the sync (found a purchase, or Pro was already active).
+    case restored
+    /// The sync worked but this Apple ID has no Pro purchase.
+    case none
+    /// The user dismissed the App Store sign-in prompt: show nothing.
+    case cancelled
+    /// Plain-language, retryable message.
+    case failed(String)
 }
 
 enum ProStoreError: Error, LocalizedError {

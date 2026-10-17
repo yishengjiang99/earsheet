@@ -56,9 +56,9 @@ struct PaywallView: View {
                     Button(isRestoring ? "Restoring…" : "Restore Purchases") {
                         isRestoring = true
                         Task {
-                            let restored = await store.restore()
+                            let result = await store.restore()
                             isRestoring = false
-                            if restored { dismiss() }
+                            if result == .restored { dismiss() }
                         }
                     }
                     .disabled(isRestoring || isPurchasing)
