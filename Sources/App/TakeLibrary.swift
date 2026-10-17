@@ -73,8 +73,14 @@ final class TakeLibrary: ObservableObject {
 
     let player = SF2MIDIPlayer()
     private var cancellables = Set<AnyCancellable>()
+    /// Folder holding takes.json and the session WAVs (Application Support unless a test injects one).
+    let directory: URL
+    /// Set when an unreadable library file could not be preserved: saving stays off so it is never overwritten.
+    private var saveBlocked = false
 
-    init() {
+    init(directory: URL = TakeLibrary.defaultDirectory) {
+        self.directory = directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         player.$activeNoteIDs
             .sink { [weak self] in self?.activeNoteIDs = $0 }
             .store(in: &cancellables)
@@ -118,7 +124,7 @@ final class TakeLibrary: ObservableObject {
     func discardHeld(_ take: Take) {
         looseTakes.removeValue(forKey: take.id)
         if let name = take.audioFileName {
-            try? FileManager.default.removeItem(at: Self.audioURL(fileName: name))
+            try? FileManager.default.removeItem(at: audioURL(for: name))
         }
     }
 
@@ -184,7 +190,7 @@ final class TakeLibrary: ObservableObject {
     func delete(_ take: Take) {
         stopPlayback()
         if let name = take.audioFileName {
-            try? FileManager.default.removeItem(at: Self.audioURL(fileName: name))
+            try? FileManager.default.removeItem(at: audioURL(for: name))
         }
         takes.removeAll { $0.id == take.id }
         save()
@@ -247,34 +253,89 @@ final class TakeLibrary: ObservableObject {
 
     // MARK: - Persistence
 
-    private func storeURL() -> URL {
+    private var storeURL: URL { directory.appendingPathComponent("takes.json", isDirectory: false) }
+
+    /// Application Support/<bundle id>, created on demand.
+    nonisolated static var defaultDirectory: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(HearSheet.bundleIdentifier, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("takes.json", isDirectory: false)
+        return dir
     }
 
     /// URL of a take's session-audio WAV in the library's Application Support dir.
     /// Nonisolated: touches only FileManager, no actor state.
     nonisolated static func audioURL(fileName: String) -> URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(HearSheet.bundleIdentifier, isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(fileName, isDirectory: false)
+        defaultDirectory.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    /// URL of a session-audio WAV in this library's directory.
+    func audioURL(for fileName: String) -> URL {
+        directory.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    /// Decodes a library file element by element so one bad element does not lose the rest.
+    /// nil when the data is not a JSON array at all; `skipped` counts undecodable elements.
+    nonisolated static func decodeTakes(_ data: Data) -> (takes: [Take], skipped: Int)? {
+        if let all = try? JSONDecoder().decode([Take].self, from: data) { return (all, 0) }
+        guard let items = try? JSONDecoder().decode([FailableTake].self, from: data) else { return nil }
+        let valid = items.compactMap(\.take)
+        return (valid, items.count - valid.count)
+    }
+
+    private struct FailableTake: Decodable {
+        let take: Take?
+        init(from decoder: Decoder) throws { take = try? Take(from: decoder) }
     }
 
     private func load() {
-        let url = storeURL()
-        guard let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([Take].self, from: data)
-        else { return }
-        takes = decoded
+        let url = storeURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            preserveUnreadable(url, move: true)
+            postNotice("Your saved takes could not be read. The file was kept as a backup.")
+            return
+        }
+        guard let decoded = Self.decodeTakes(data) else {
+            preserveUnreadable(url, move: true)
+            postNotice("Your saved takes could not be read. The file was kept as a backup.")
+            return
+        }
+        takes = decoded.takes
+        if decoded.skipped > 0 {
+            preserveUnreadable(url, move: false)
+            postNotice("\(decoded.skipped) saved take\(decoded.skipped == 1 ? "" : "s") could not be read and "
+                       + "\(decoded.skipped == 1 ? "was" : "were") skipped. A backup of the original file was kept.")
+        }
+    }
+
+    /// Keeps the original bytes as takes.corrupt-<timestamp>.json before anything can overwrite them.
+    /// If that fails, saving is switched off for this launch rather than risk the file.
+    private func preserveUnreadable(_ url: URL, move: Bool) {
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let backup = directory.appendingPathComponent("takes.corrupt-\(stamp).json", isDirectory: false)
+        do {
+            if move {
+                try FileManager.default.moveItem(at: url, to: backup)
+            } else {
+                try FileManager.default.copyItem(at: url, to: backup)
+            }
+        } catch {
+            saveBlocked = true
+        }
     }
 
     private func save() {
-        let url = storeURL()
-        guard let data = try? JSONEncoder().encode(takes) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard !saveBlocked else {
+            postNotice("Your saved takes file could not be backed up, so changes are not being saved right now. Restart the app.")
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(takes)
+            try data.write(to: storeURL, options: .atomic)
+        } catch {
+            postNotice("Could not save your takes: \(error.localizedDescription)")
+        }
     }
 }
 
