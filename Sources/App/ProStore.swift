@@ -12,8 +12,9 @@ import StoreKit
 /// these prices: the paywall reads Product.price / displayPrice / priceFormatStyle.
 ///
 /// Entitlement = active Pro subscription OR owned Lifetime.
-/// The entitlement is cached locally and refreshed on launch, on
-/// Transaction.updates, and on restore.
+/// The entitlement is cached locally and refreshed on launch, on every return to the foreground
+/// (ContentView), on Transaction.updates, on restore, and at the earliest known expiry date (StoreKit
+/// emits no update when a subscription lapses).
 ///
 /// Server loop: every verified purchase, restore and Transaction.updates item is
 /// queued for `POST /api/iap/verify` (ServerSync / VerifyQueue, retried until the
@@ -40,6 +41,7 @@ final class ProStore: ObservableObject {
     @Published var purchaseError: String?
 
     private var updatesTask: Task<Void, Never>?
+    private var expiryTask: Task<Void, Never>?
     private var cache = EntitlementCache()
 
     init() {
@@ -51,6 +53,7 @@ final class ProStore: ObservableObject {
 
     deinit {
         updatesTask?.cancel()
+        expiryTask?.cancel()
     }
 
     // MARK: - Products
@@ -164,19 +167,39 @@ final class ProStore: ObservableObject {
     /// Recompute Pro status from verified current entitlements.
     func refreshEntitlement() async {
         var pro = false
+        var earliestExpiry: Date?
         for await result in Transaction.currentEntitlements {
-            do {
-                let transaction = try checked(result)
-                if Self.productIDs.contains(transaction.productID) {
-                    pro = true
-                }
-            } catch {
-                continue
+            guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
+            pro = true
+            if let expiry = transaction.expirationDate {
+                earliestExpiry = earliestExpiry.map { min($0, expiry) } ?? expiry
             }
         }
         isPro = pro
         cache.isPro = pro
         cache.lastRefresh = Date()
+        scheduleExpiryRefresh(at: pro ? earliestExpiry : nil)
+    }
+
+    /// Seconds to wait before re-checking entitlements for a subscription that expires at `expiry`.
+    /// A little after the expiry so StoreKit has dropped it; never a tight loop for an expiry that is
+    /// already past but still listed (billing grace period): that rechecks every minute.
+    nonisolated static func refreshDelay(forExpiry expiry: Date, now: Date = Date()) -> TimeInterval {
+        let remaining = expiry.timeIntervalSince(now)
+        return remaining > 0 ? remaining + 2 : 60
+    }
+
+    /// StoreKit posts no Transaction update when a subscription lapses, so wake up at the expiry date.
+    private func scheduleExpiryRefresh(at expiry: Date?) {
+        expiryTask?.cancel()
+        expiryTask = nil
+        guard let expiry else { return }
+        let delay = Self.refreshDelay(forExpiry: expiry)
+        expiryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(min(delay, 7 * 86400) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.refreshEntitlement()
+        }
     }
 
     /// Queues the JWS of every verified current entitlement for the server. Returns the count.

@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var library = TakeLibrary()
     @StateObject private var proStore = ProStore()
     @StateObject private var triggers = PaywallTriggers()
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
 
     var body: some View {
@@ -20,6 +21,10 @@ struct ContentView: View {
         .task {
             await proStore.refreshEntitlement()
             triggers.resetSession()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // A lapsed subscription must lock Pro on the next foreground, not on the next launch.
+            if phase == .active { Task { await proStore.refreshEntitlement() } }
         }
     }
 }
