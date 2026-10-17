@@ -1,6 +1,6 @@
-Play it, see it. AI Music Radar listens as you play, sing, or hum — and writes the score live, right on your iPhone.
+Play it, see it. AI Music Radar listens as you play, sing, or hum and turns it into sheet music, right on your iPhone.
 
-Tap the mic and notes appear while you play: an engraved staff page with tempo, time signature, and key detection. Press play to hear it back with every note lighting up as it sounds, or flip to the piano roll to check pitches and rhythm. Import an audio file or grab the sound straight from a video in your Photos. Then take it further in MuseScore, Dorico, Sibelius, Finale, Logic, GarageBand, or any DAW.
+Tap the mic and watch the notes appear on a piano roll while you play. When you stop, AI Music Radar writes the engraved score from your whole take, with tempo, time signature, and key detection. Press play to hear it back with every note lighting up as it sounds, and switch between the page and the piano roll to check pitches and rhythm. Import an audio file or grab the sound straight from a video in your Photos. Then take it further in MuseScore, Dorico, Sibelius, Finale, Logic, GarageBand, or any DAW.
 
 PRIVATE BY DESIGN
 • Transcription runs entirely on your device with an on-device neural network. Your recordings are never uploaded.
@@ -8,13 +8,15 @@ PRIVATE BY DESIGN
 • Works offline: on a plane, in a practice room, in a classroom with no Wi-Fi.
 
 FREE INCLUDES
-• Real-time transcription from the microphone
+• Transcription from the microphone: a live piano roll while you play, the engraved score when you stop
+• Import audio or video (first 30 seconds)
 • Engraved score and piano roll with note-by-note playback
 • Save up to 3 pieces
 • MP3 and photo export, plus PDF of the first 30 seconds
 
 AI MUSIC RADAR PRO
 • Unlimited saved pieces
+• Import audio or video up to 60 seconds
 • MIDI and MusicXML export
 • Full-length PDF export
 • Available as a monthly or yearly subscription (7-day free trial) or a one-time lifetime purchase

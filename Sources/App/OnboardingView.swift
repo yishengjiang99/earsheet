@@ -29,7 +29,7 @@ struct OnboardingView: View {
                 OnboardingPage(
                     art: AnyView(PageArt()),
                     title: "Get the page.",
-                    text: "Watch the score write itself in real time. Play it back, study the engraved page, or share it as MIDI, MP3, MusicXML, PDF, or a photo."
+                    text: "Watch the notes appear as you play, then get the engraved page when you stop. Play it back, study the score, or share it as MIDI, MP3, MusicXML, PDF, or a photo."
                 ).tag(1)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))

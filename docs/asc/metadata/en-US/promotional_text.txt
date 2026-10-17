@@ -1,1 +1,1 @@
-It writes the score while you play. Real-time, on-device transcription of piano, voice and more into sheet music, MIDI and PDF. No account, works offline.
+Watch notes appear as you play, then get the sheet music when you stop. On-device transcription of piano, voice and more into sheet music, MIDI and PDF. No account needed.

@@ -76,7 +76,7 @@ struct LibraryView: View {
                             }
                         }
                         .accessibilityLabel("Listen to music")
-                        .accessibilityHint("Starts listening and writes the score as you play")
+                        .accessibilityHint("Starts listening and shows the notes as you play")
                         Button(action: { showVideoPicker = true }) {
                             ZStack {
                                 Circle()
@@ -92,7 +92,7 @@ struct LibraryView: View {
                         .accessibilityLabel("Import video from Photos")
                         .accessibilityHint("Chooses a video from Photos and transcribes its audio")
                     }
-                    Text("Tap to listen — AI Music Radar writes the score as you play.")
+                    Text("Tap to listen — notes appear as you play, the sheet is ready when you stop.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
