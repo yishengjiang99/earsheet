@@ -111,4 +111,49 @@ final class ListeningFlowTests: XCTestCase {
         XCTAssertNil(recorder.onSamples)
         XCTAssertEqual(recorder.stopCount, 0, "a recorder that never started is not stopped")
     }
+
+    // MARK: - Cancel (F4.7)
+
+    func testCancelDiscardsWithoutTake() async {
+        let recorder = FakeRecorder()
+        recorder.samplesToReturn = [Float](repeating: 0.3, count: 22_050)
+        let library = TakeLibrary()
+        let takesBefore = library.userTakes.count
+        let wavsBefore = ListeningTestSupport.wavFileCount()
+        let session = ListeningTestSupport.makeSession(recorder: recorder, library: library)
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertEqual(session.phase, .listening)
+
+        session.cancel()
+
+        XCTAssertEqual(session.phase, .cancelled)
+        XCTAssertEqual(recorder.stopCount, 1, "the mic is released")
+        XCTAssertEqual(library.userTakes.count, takesBefore, "no take is created")
+        XCTAssertEqual(ListeningTestSupport.wavFileCount(), wavsBefore, "no WAV is written")
+        session.cancel() // already cancelled: no second stop
+        XCTAssertEqual(recorder.stopCount, 1)
+    }
+
+    func testCancelWhileWarmingUpNeverOpensTheMic() async {
+        let recorder = FakeRecorder()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        session.start()
+        session.cancel()
+        await session.startTask?.value
+        XCTAssertEqual(session.phase, .cancelled)
+        XCTAssertEqual(recorder.startCount, 0)
+    }
+
+    func testCancelConfirmationOnlyAfterAFewSeconds() async {
+        let recorder = FakeRecorder()
+        let session = ListeningTestSupport.makeSession(recorder: recorder)
+        XCTAssertFalse(session.needsCancelConfirmation, "not listening yet")
+        await ListeningTestSupport.startAndWait(session)
+        XCTAssertFalse(session.needsCancelConfirmation, "nothing captured yet")
+        recorder.recordedSeconds = ListeningSession.cancelConfirmSeconds + 1
+        try? await Task.sleep(nanoseconds: 800_000_000) // the 0.25 s timer publishes `elapsed`
+        XCTAssertTrue(session.needsCancelConfirmation, "more than a few seconds captured: confirm first")
+        session.cancel()
+        XCTAssertFalse(session.needsCancelConfirmation)
+    }
 }
