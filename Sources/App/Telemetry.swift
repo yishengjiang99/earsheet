@@ -55,12 +55,17 @@ final class Telemetry: @unchecked Sendable {
         case purchaseStart = "purchase_start"
         case purchaseSuccess = "purchase_success"
         case purchaseFail = "purchase_fail"
+        /// The user dismissed the purchase sheet: not a failure.
+        case purchaseCancel = "purchase_cancel"
+        /// Ask to Buy / SCA: waiting for approval: not a failure.
+        case purchasePending = "purchase_pending"
+        case paywallDismiss = "paywall_dismiss"
         case restore = "restore"
     }
 
     /// The only property keys that may leave the phone.
     static let allowedPropertyKeys: Set<String> = [
-        "cold", "source", "duration_s", "notes", "product", "reason", "code", "result", "restored",
+        "cold", "source", "duration_s", "notes", "product", "reason", "code", "result", "restored", "trigger",
     ]
     static let maxQueued = 5000
     static let batchSize = 100

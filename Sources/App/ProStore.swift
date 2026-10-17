@@ -127,19 +127,19 @@ final class ProStore: ObservableObject {
                 Telemetry.shared.track(.purchaseSuccess, ["product": product.id])
                 return isPro
             case .userCancelled:
-                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "cancelled"])
+                PurchaseFunnel.cancelled.record(productID: product.id)
                 return false
             case .pending:
                 purchaseError = "Purchase is pending approval."
-                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "pending"])
+                PurchaseFunnel.pending.record(productID: product.id)
                 return false
             @unknown default:
-                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "unknown"])
+                PurchaseFunnel.unknown.record(productID: product.id)
                 return false
             }
         } catch {
             if StoreMessages.isUserCancel(error) {
-                Telemetry.shared.track(.purchaseFail, ["product": product.id, "reason": "cancelled"])
+                PurchaseFunnel.cancelled.record(productID: product.id)
                 return false
             }
             purchaseError = StoreMessages.purchaseFailure(error)
@@ -249,6 +249,25 @@ final class ProStore: ObservableObject {
     /// Per-install token sent with every purchase so the server can link
     /// transactions to this install. Generated once, stored in UserDefaults.
     var appAccountToken: UUID { InstallIdentity.appAccountToken }
+}
+
+/// Non-success purchase outcomes for the anonymous funnel. Cancel and Ask-to-Buy pending are not
+/// failures: `purchase_fail` is kept for real errors (see `StoreMessages.failureProperties`).
+enum PurchaseFunnel {
+    case cancelled, pending, unknown
+
+    func telemetry(productID: String) -> (event: Telemetry.Event, properties: [String: Any]) {
+        switch self {
+        case .cancelled: return (.purchaseCancel, ["product": productID])
+        case .pending: return (.purchasePending, ["product": productID])
+        case .unknown: return (.purchaseFail, ["product": productID, "reason": "unknown"])
+        }
+    }
+
+    func record(productID: String) {
+        let t = telemetry(productID: productID)
+        Telemetry.shared.track(t.event, t.properties)
+    }
 }
 
 /// Outcome of `ProStore.restore()`.
