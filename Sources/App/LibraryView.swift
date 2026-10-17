@@ -17,6 +17,9 @@ struct LibraryView: View {
     @State private var importTask: Task<Void, Never>?
     @State private var importState = ImportCoordinator()
     @State private var showPaywall = false
+    @State private var paywallTrigger: PaywallTriggers.Trigger = .saveLimit
+    @State private var showThirdTakeCard = false
+    @State private var thirdTakeCardChecked = false
     @StateObject private var importGate = ImportLimitGate()
     @State private var showSettings = false
     /// An import held by the free save limit: shown as Library > Take with a "Not saved yet" banner.
@@ -44,6 +47,11 @@ struct LibraryView: View {
                         }
                     }
                     Section {
+                        if showThirdTakeCard && ThirdTakeCard.isEligible(isPro: proStore.isPro, savedCount: library.userTakes.count) {
+                            ThirdTakeCardView(onOpen: openThirdTakeCardPlans, onDismiss: dismissThirdTakeCard)
+                                .listRowBackground(Ink.paper)
+                                .listRowSeparator(.hidden)
+                        }
                         if library.userTakes.isEmpty {
                             Text("No takes yet — tap the microphone and play something.")
                                 .foregroundStyle(.secondary)
@@ -177,7 +185,7 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $showPaywall) {
-            PaywallView(store: proStore, trigger: PaywallTriggers.Trigger.saveLimit.analyticsName)
+            PaywallView(store: proStore, trigger: paywallTrigger.analyticsName)
         }
         .onChange(of: showPaywall) { _, showing in
             if !showing && !proStore.isPro {
@@ -185,6 +193,10 @@ struct LibraryView: View {
             }
             if !showing { paywallIsAuto = false }
         }
+        .onAppear { refreshThirdTakeCard() }
+        .onChange(of: library.userTakes.count) { _, _ in refreshThirdTakeCard() }
+        .onChange(of: showListening) { _, _ in refreshThirdTakeCard() }
+        .onChange(of: path) { _, _ in refreshThirdTakeCard() }
         .onChange(of: proStore.isPro) { _, isPro in
             if isPro, let held = heldImport.release() {
                 showPaywall = false
@@ -194,7 +206,7 @@ struct LibraryView: View {
         }
         .confirmationDialog("This piece isn't saved", isPresented: $confirmLeaveHeld, titleVisibility: .visible) {
             Button("Discard", role: .destructive, action: discardHeldImport)
-            Button("Keep it with Pro") { showPaywall = true }
+            Button("Keep it with Pro") { presentPaywall(.saveLimit, automatic: false) }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Free keeps \(ProStore.freeSaveLimit) pieces. Leaving now discards this one.")
@@ -241,7 +253,7 @@ struct LibraryView: View {
         SheetDetailView(take: take, library: library, proStore: proStore,
                         onRecord: { confirmLeaveHeld = true })
             .safeAreaInset(edge: .top, spacing: 0) {
-                HeldTakeBanner { showPaywall = true }
+                HeldTakeBanner { presentPaywall(.saveLimit, automatic: false) }
             }
             .navigationBarBackButtonHidden(true)
             .toolbar {
@@ -262,6 +274,42 @@ struct LibraryView: View {
     /// What the shared upgrade-prompt policy needs to know about the Library right now.
     private var promptContext: UpgradePromptContext {
         UpgradePromptContext(proStore: proStore, finishedTakes: library.userTakes.count, isRecording: showListening)
+    }
+
+    private func presentPaywall(_ trigger: PaywallTriggers.Trigger, automatic: Bool) {
+        paywallTrigger = trigger
+        paywallIsAuto = automatic
+        showPaywall = true
+    }
+
+    /// Back on the Library (not recording, no take open) with exactly 3 saved pieces: ask the policy
+    /// once whether the soft card may show. Once shown it stays until dismissed, tapped through or
+    /// no longer true.
+    private func refreshThirdTakeCard() {
+        guard ThirdTakeCard.isEligible(isPro: proStore.isPro, savedCount: library.userTakes.count) else {
+            showThirdTakeCard = false
+            thirdTakeCardChecked = false
+            return
+        }
+        guard !thirdTakeCardChecked, path.isEmpty, !showListening else { return }
+        thirdTakeCardChecked = true
+        if ThirdTakeCard.present(isPro: proStore.isPro, savedCount: library.userTakes.count,
+                                 isRecording: showListening, purchaseActive: proStore.purchaseActive,
+                                 triggers: triggers) {
+            showThirdTakeCard = true
+            Telemetry.shared.track(.softPromptShown, ["kind": "third_transcription"])
+        }
+    }
+
+    private func openThirdTakeCardPlans() {
+        Telemetry.shared.track(.softPromptTapped, ["kind": "third_transcription"])
+        presentPaywall(.thirdTranscription, automatic: false)
+    }
+
+    private func dismissThirdTakeCard() {
+        Telemetry.shared.track(.softPromptDismissed, ["kind": "third_transcription", "result": "close"])
+        showThirdTakeCard = false
+        ThirdTakeCard.dismissed(triggers: triggers)
     }
 
     /// Shows `take` as Library > Take (replaces any open take).
@@ -299,8 +347,7 @@ struct LibraryView: View {
             open(take)
             if triggers.decision(.saveLimit, context: promptContext).isShow {
                 triggers.recordAutoShown(.saveLimit)
-                paywallIsAuto = true
-                showPaywall = true
+                presentPaywall(.saveLimit, automatic: true)
             }
             return .held
         } else if let title {
