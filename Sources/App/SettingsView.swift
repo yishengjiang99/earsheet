@@ -239,7 +239,7 @@ struct SettingsView: View {
     /// checked first and every failure is shown (see `NoiseFloorMeter`).
     private func measureFloor() {
         measuringFloor = true
-        Task {
+        Task { @MainActor in
             let outcome = await NoiseFloorMeter().measure()
             measuringFloor = false
             if outcome != .measured { floorProblem = outcome }
