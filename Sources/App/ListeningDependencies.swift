@@ -8,6 +8,7 @@ import HearSheet
 protocol Recording: AnyObject {
     var onSamples: (([Float]) -> Void)? { get set }
     var onLevel: ((Float) -> Void)? { get set }
+    var onInterruption: ((Bool) -> Void)? { get set }
     var recordedSeconds: Double { get }
     var currentSamples: [Float] { get }
     var gateThresholdDB: Double { get }
