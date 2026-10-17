@@ -23,8 +23,8 @@ The paywall offers 3 options, all in App Store Connect and included in this subm
 Prices are loaded from StoreKit and shown in the local currency. The trial wording only appears when StoreKit reports the account is eligible for the introductory offer. The paywall shows the auto-renewal terms and has Restore Purchases, Terms of Use (Apple standard EULA) and Privacy Policy links.
 
 WHAT FREE AND PRO INCLUDE (as enforced in the app)
-Free: unlimited listening; piano roll and engraved page with playback; save up to 3 pieces; audio and video imports up to the first 30 seconds; PDF export of the first 30 seconds; MP3 and Photo export; tempo adjustment.
-Pro: unlimited saved pieces; audio and video imports up to 60 seconds; full-length PDF; MIDI and MusicXML export.
+Free: unlimited listening; piano roll and engraved page with playback; save up to 3 pieces; audio and video imports (only the first 30 seconds of a file are transcribed, and the app says so); PDF export of the first 30 seconds; MP3 and Photo export; tempo adjustment.
+Pro: unlimited saved pieces; audio and video imports up to 60 seconds (files longer than 60 seconds are not accepted on any plan); full-length PDF; MIDI and MusicXML export.
 
 SANDBOX PURCHASE AND RESTORE
 1. Sign in with a sandbox Apple Account (Settings > App Store > Sandbox Account on the device, or use a StoreKit-enabled build).
