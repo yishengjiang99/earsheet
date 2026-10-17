@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import XCTest
 import StoreKit
+import StoreKitTest
 @testable import EarSheet
 
 /// Purchase failure copy and analytics reasons: plain language, no raw `Error` text (#28).
@@ -72,5 +73,47 @@ final class PurchaseFlowTests: XCTestCase {
         for props in [unverified, net, other] {
             XCTAssertFalse(props.values.contains { ($0 as? String)?.contains("RAWSYSTEMTEXT") == true })
         }
+    }
+
+    func testPaywallDismissesWhenProTurnsOn() {
+        XCTAssertTrue(PaywallView.shouldDismiss(wasPro: false, isPro: true))
+        XCTAssertFalse(PaywallView.shouldDismiss(wasPro: true, isPro: true))
+        XCTAssertFalse(PaywallView.shouldDismiss(wasPro: true, isPro: false))
+        XCTAssertFalse(PaywallView.shouldDismiss(wasPro: false, isPro: false))
+    }
+
+    @MainActor
+    func testApprovalOfPendingPurchaseSetsPro() async throws {
+        UserDefaults.standard.removeObject(forKey: "pro.isPro")
+        defer { UserDefaults.standard.removeObject(forKey: "pro.isPro") }
+        let session: SKTestSession
+        do {
+            session = try SKTestSession(contentsOf: PaywallPricingTests.storekitURL)
+        } catch {
+            throw XCTSkip("SKTestSession unavailable here: \(error)")
+        }
+        session.resetToDefaultState()
+        session.clearTransactions()
+        session.disableDialogs = true
+        session.askToBuyEnabled = true
+
+        let store = ProStore()
+        await store.loadProducts(force: true)
+        guard let yearly = store.product(for: ProStore.yearlyID) else {
+            throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
+        }
+        let becamePro = await store.purchase(yearly)
+        XCTAssertFalse(becamePro, "Ask to Buy returns pending, not Pro")
+        XCTAssertFalse(store.isPro)
+        XCTAssertEqual(store.purchaseError, "Purchase is pending approval.")
+
+        let pending = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProStore.yearlyID })
+        try session.approveAskToBuyTransaction(identifier: pending.identifier)
+
+        // Transaction.updates -> refreshEntitlement flips isPro (the paywall observes it and closes).
+        for _ in 0..<50 where !store.isPro {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        XCTAssertTrue(store.isPro, "approval must turn Pro on without another purchase call")
     }
 }
