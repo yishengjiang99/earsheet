@@ -305,6 +305,7 @@ struct LibraryView: View {
     /// MIDI carries notes already: parse and quantize, no transcription.
     private func importMIDI(url: URL) {
         Task { @MainActor in
+            defer { ImportCleanup.removeTemporaryCopy(at: url) }
             do {
                 let data = try Data(contentsOf: url)
                 let song = try SMFSong(data: data)
@@ -330,12 +331,14 @@ struct LibraryView: View {
     private func importVideo(url: URL) {
         guard let token = importState.begin(.video) else { return }
         importTask = Task { @MainActor in
-            defer { importState.finish(token) }
+            defer {
+                importState.finish(token)
+                ImportCleanup.removeTemporaryCopy(at: url)
+            }
             do {
                 let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(asset: AVAsset(url: url))
                 }
-                try? FileManager.default.removeItem(at: url) // temp copy
                 try Task.checkCancellation()
                 guard !loaded.isEmpty else {
                     library.postNotice(ImportCoordinator.emptyAudioNotice(for: .video))
@@ -361,7 +364,6 @@ struct LibraryView: View {
             } catch is CancellationError {
                 // Cancelled by the user; stay silent.
             } catch {
-                try? FileManager.default.removeItem(at: url)
                 library.postNotice(ImportErrorMessage.message(for: error, source: .video))
             }
         }
@@ -370,7 +372,10 @@ struct LibraryView: View {
     private func importAudio(url: URL) {
         guard let token = importState.begin(.audio) else { return }
         importTask = Task { @MainActor in
-            defer { importState.finish(token) }
+            defer {
+                importState.finish(token)
+                ImportCleanup.removeTemporaryCopy(at: url)
+            }
             do {
                 let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(url: url)

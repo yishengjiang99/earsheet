@@ -122,3 +122,18 @@ struct HeldImport: Equatable {
     /// The user upgraded: hand the take over to be saved.
     mutating func release() -> Take? { discard() }
 }
+
+/// Removes the temporary copy of a picked file (document picker `asCopy`, Photos video copy) once
+/// an import is over, on every path. Only files inside the app's temporary directory are touched.
+enum ImportCleanup {
+    static func isTemporary(_ url: URL) -> Bool {
+        let tmp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        let file = url.resolvingSymlinksInPath().path
+        return file.hasPrefix(tmp.hasSuffix("/") ? tmp : tmp + "/")
+    }
+
+    static func removeTemporaryCopy(at url: URL) {
+        guard isTemporary(url) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+}
