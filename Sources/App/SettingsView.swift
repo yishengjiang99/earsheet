@@ -59,6 +59,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    .manageSubscriptionsSheet(isPresented: $showManage)
                     Button {
                         restoring = true
                         Task {
@@ -177,7 +178,6 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .manageSubscriptionsSheet(isPresented: $showManage)
             .sheet(isPresented: $showPaywall) {
                 PaywallView(store: store, trigger: "settings")
             }

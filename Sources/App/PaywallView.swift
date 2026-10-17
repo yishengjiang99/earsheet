@@ -94,7 +94,6 @@ struct PaywallView: View {
                 selectDefaultPlan()
             }
             .onChange(of: store.products.map(\.id)) { _, _ in selectDefaultPlan() }
-            .manageSubscriptionsSheet(isPresented: $showManage)
             .onChange(of: store.isPro) { wasPro, isPro in
                 // Ask to Buy approval, a restore elsewhere or a purchase all end here: close on the
                 // entitlement change, not on `purchase()`'s return value.
@@ -145,6 +144,7 @@ struct PaywallView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .manageSubscriptionsSheet(isPresented: $showManage)
     }
 
     // MARK: - Sections
