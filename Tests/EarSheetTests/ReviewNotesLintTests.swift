@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import XCTest
+@testable import EarSheet
 
-final class SettingsTests: XCTestCase {
+extension SettingsTests {
     private func reviewNotes() throws -> String {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

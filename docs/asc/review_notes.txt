@@ -28,7 +28,7 @@ Pro: unlimited saved pieces; audio and video imports up to 60 seconds; full-leng
 
 SANDBOX PURCHASE AND RESTORE
 1. Sign in with a sandbox Apple Account (Settings > App Store > Sandbox Account on the device, or use a StoreKit-enabled build).
-2. Open the paywall as described above, pick a plan and tap the purchase button. Confirm with the sandbox account. Pro unlocks immediately: the lock icons on MIDI and MusicXML disappear, saves are unlimited, PDF is full length, and Settings shows "You have Pro".
-3. Restore: with the same Apple Account, tap the gear icon (top left) > "Restore Purchases", or "Restore Purchases" on the paywall. A confirmation message appears when Pro is restored (or that no purchases were found).
+2. Open the paywall as described above, pick a plan and tap the purchase button. Confirm with the sandbox account. Pro unlocks immediately: the lock icons on MIDI and MusicXML disappear, saves are unlimited, PDF is full length, and the Settings row now reads "AI Music Radar Pro" (once Pro is active it opens Manage Subscription instead of the paywall).
+3. Restore: with the same Apple Account, tap the gear icon (top left) > "Restore Purchases", or "Restore Purchases" on the paywall. An alert reports the result: "Pro is active on this Apple ID. Thanks for supporting AI Music Radar!" when a Pro purchase is found, or "No Pro purchase found on this Apple ID." when there is none.
 
 Contact: Yisheng Jiang, yisheng.jiang@gmail.com, +1 669 251 7789
