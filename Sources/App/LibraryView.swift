@@ -204,7 +204,8 @@ struct LibraryView: View {
     }
 
     /// Save a transcribed score, or hold it behind the paywall at the free limit.
-    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil, events: [NoteEvent]) {
+    @discardableResult
+    private func saveImportedScore(_ score: QuantizedScore, title: String? = nil, events: [NoteEvent]) -> SaveDecision {
         if SaveGate.decision(isPro: proStore.isPro, savedCount: library.userTakes.count) == .held {
             pendingScore = (score, title, events)
             if triggers.canShowAuto(.saveLimit) {
@@ -213,10 +214,21 @@ struct LibraryView: View {
             } else {
                 library.postNotice("You've reached 3 saved pieces. Upgrade to Pro in Settings to keep this one — it's held for now.")
             }
+            return .held
         } else if let title {
             open(library.addTake(title: title, score: score, events: events))
         } else {
             open(library.addTake(score: score, events: events))
+        }
+        return .save
+    }
+
+    /// Saves (or holds) a transcribed import, then tells a free user when the file was shortened.
+    private func finishImport(_ score: QuantizedScore, events: [NoteEvent], isPro: Bool, trimmed: Bool) {
+        let decision = saveImportedScore(score, events: events)
+        if decision == .save,
+           let notice = ImportPolicy.trimmedNotice(isPro: isPro, wasTrimmed: trimmed) {
+            library.postNotice(notice)
         }
     }
 
@@ -249,11 +261,13 @@ struct LibraryView: View {
         importTask?.cancel()
         importTask = Task { @MainActor in
             do {
-                let samples = try await runCancellableDetached {
+                let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(asset: AVAsset(url: url))
                 }
                 try? FileManager.default.removeItem(at: url) // temp copy
-                guard !samples.isEmpty else { return }
+                guard !loaded.isEmpty else { return }
+                let isPro = proStore.isPro
+                let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
                 Telemetry.shared.track(.transcriptionStart, ["source": "video"])
                 let notes = try await runCancellableDetached {
@@ -266,7 +280,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that video's audio.")
                 } else {
-                    saveImportedScore(score, events: notes)
+                    finishImport(score, events: notes, isPro: isPro, trimmed: trimmed)
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
@@ -281,10 +295,12 @@ struct LibraryView: View {
         importTask?.cancel()
         importTask = Task { @MainActor in
             do {
-                let samples = try await runCancellableDetached {
+                let loaded = try await runCancellableDetached {
                     try AudioImport.loadMono22050(url: url)
                 }
-                guard !samples.isEmpty else { return }
+                guard !loaded.isEmpty else { return }
+                let isPro = proStore.isPro
+                let (samples, trimmed) = ImportPolicy.trim(loaded, isPro: isPro)
                 let durationS = Double(samples.count) / 22_050.0
                 Telemetry.shared.track(.transcriptionStart, ["source": "import"])
                 let notes = try await runCancellableDetached {
@@ -297,7 +313,7 @@ struct LibraryView: View {
                 if score.notes.isEmpty {
                     library.postNotice("No notes found in that file.")
                 } else {
-                    saveImportedScore(score, events: notes)
+                    finishImport(score, events: notes, isPro: isPro, trimmed: trimmed)
                 }
             } catch is CancellationError {
                 // Superseded by a newer import; stay silent.
