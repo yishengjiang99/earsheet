@@ -31,6 +31,7 @@ struct SettingsView: View {
     /// 0 = never measured.
     @AppStorage(InputConditioner.Settings.Keys.lastFloorAt) private var lastFloorAt = 0.0
     @State private var measuringFloor = false
+    @State private var floorProblem: NoiseFloorMeter.Outcome?
 
     var body: some View {
         NavigationStack {
@@ -219,21 +220,29 @@ struct SettingsView: View {
             }
         }
         .accessibilityElement(children: .combine)
+        .alert("Noise floor", isPresented: Binding(
+            get: { floorProblem != nil },
+            set: { if !$0 { floorProblem = nil } }
+        ), presenting: floorProblem) { problem in
+            if problem == .permissionDenied {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+            }
+            Button("OK", role: .cancel) {}
+        } message: { problem in
+            Text(NoiseFloorMeter.message(for: problem) ?? "")
+        }
     }
 
-    /// Listens for 1.2 s (stay quiet) and stores the floor; nothing is recorded or kept.
+    /// Listens for 1.2 s (stay quiet) and stores the floor; nothing is recorded or kept. Permission is
+    /// checked first and every failure is shown (see `NoiseFloorMeter`).
     private func measureFloor() {
         measuringFloor = true
-        let recorder = AudioRecorder()
-        do {
-            try recorder.start()
-        } catch {
+        Task { @MainActor in
+            let outcome = await NoiseFloorMeter().measure()
             measuringFloor = false
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            _ = recorder.stop() // saves the measured floor to UserDefaults (shown above)
-            measuringFloor = false
+            if outcome != .measured { floorProblem = outcome }
         }
     }
 
