@@ -166,7 +166,7 @@ final class ListeningSession: ObservableObject {
                 self.finalNotes = notes
                 if score.notes.isEmpty {
                     self.phase = .failed("No notes found. Try again, closer to the music.")
-                } else if !self.proStore.isPro && self.library.userTakes.count >= ProStore.freeSaveLimit {
+                } else if SaveGate.decision(isPro: self.proStore.isPro, savedCount: self.library.userTakes.count) == .held {
                     // Free limit reached: the take is written and viewable,
                     // but keeping it requires Pro.
                     let take = Take(id: UUID(),
