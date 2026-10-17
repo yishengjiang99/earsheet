@@ -1,18 +1,34 @@
 Added subscription terms and a functional Terms of Use (EULA) and Privacy Policy link to the App Store description, per 3.1.2.
 
-No account or login is needed; all features work on-device.
+No account or login is needed; all features work on-device. Audio is transcribed on the phone and is never uploaded.
 
-How to reach the paywall (AI Music Radar Pro):
-1. Launch the app and finish or skip onboarding to reach the Library.
-2. Tap the gear icon (Settings, top right), then tap "Go Pro".
-The paywall also opens when you tap MIDI or MusicXML export on a saved piece, or try to save a 4th piece.
+QUICK TOUR WITHOUT A MICROPHONE (works on any device or simulator)
+1. Launch the app and finish or skip onboarding to reach the Library ("Sheets").
+2. Under the "Samples" heading tap a built-in piece (for example "C Major Scale"). It opens on the "Piano roll" view. Tap Play (center button) to hear it, or switch to the "Page" tab to see the engraved score.
+3. Tap the Export icon (square with arrow, bottom bar). PDF (first 30 seconds), MP3 and Photo work on the free tier. MIDI and MusicXML show a lock and open the paywall.
+4. You can also import audio: tap the import icon (top right of the Library) > "Choose Audio or MIDI File" and pick any audio or MIDI file, or "Choose Video from Photos".
+
+MICROPHONE PATH
+Tap the large microphone button at the bottom of the Library. iOS asks for microphone access (used only to listen while recording; nothing is uploaded): tap Allow. Play or sing music close to the phone (a speaker playing a piano recording works). Notes appear live as a piano roll while recording, with a 60 second maximum. Tap the Stop button; the engraved page is written from the whole take after you stop. If the recording is silent or too quiet the app shows "Too quiet to transcribe" (or "No notes found"); try again closer to the music, a few seconds of clear playing is enough. If microphone access was denied, the app shows how to enable it in Settings.
+
+HOW TO REACH THE PAYWALL (AI Music Radar Pro)
+- Tap the gear icon (Settings, top left of the Library), then tap "Go Pro".
+- Or open any piece (sample or saved), tap Export, then tap MIDI or MusicXML.
+- Or try to save a 4th piece (3 saved pieces are free).
 
 The paywall offers 3 options, all in App Store Connect and included in this submission:
 - Pro Yearly (com.ragnus.pnge.pro.yearly), auto-renewable, $29.99/year, 1-week free trial for eligible new subscribers
 - Pro Monthly (com.ragnus.pnge.pro.monthly), auto-renewable, $4.99/month, 1-week free trial for eligible new subscribers
 - Lifetime Pro (com.ragnus.pnge.lifetime), non-consumable, $49.99 one-time purchase
-Prices are loaded from StoreKit and shown in the local currency. The trial wording only appears when StoreKit reports the account is eligible for the introductory offer. The paywall shows the auto-renewal terms and has Restore Purchases, Terms of Use (Apple standard EULA) and Privacy Policy links. Restore Purchases is also in Settings.
+Prices are loaded from StoreKit and shown in the local currency. The trial wording only appears when StoreKit reports the account is eligible for the introductory offer. The paywall shows the auto-renewal terms and has Restore Purchases, Terms of Use (Apple standard EULA) and Privacy Policy links.
 
-Sandbox purchases work: buy any option with a sandbox Apple Account and Pro unlocks immediately (unlimited saves, full-length imports, MIDI, MusicXML and full PDF export).
+WHAT FREE AND PRO INCLUDE (as enforced in the app)
+Free: unlimited listening; piano roll and engraved page with playback; save up to 3 pieces; audio and video imports up to the first 30 seconds; PDF export of the first 30 seconds; MP3 and Photo export; tempo adjustment.
+Pro: unlimited saved pieces; audio and video imports up to 60 seconds; full-length PDF; MIDI and MusicXML export.
+
+SANDBOX PURCHASE AND RESTORE
+1. Sign in with a sandbox Apple Account (Settings > App Store > Sandbox Account on the device, or use a StoreKit-enabled build).
+2. Open the paywall as described above, pick a plan and tap the purchase button. Confirm with the sandbox account. Pro unlocks immediately: the lock icons on MIDI and MusicXML disappear, saves are unlimited, PDF is full length, and Settings shows "You have Pro".
+3. Restore: with the same Apple Account, tap the gear icon (top left) > "Restore Purchases", or "Restore Purchases" on the paywall. A confirmation message appears when Pro is restored (or that no purchases were found).
 
 Contact: Yisheng Jiang, yisheng.jiang@gmail.com, +1 669 251 7789
