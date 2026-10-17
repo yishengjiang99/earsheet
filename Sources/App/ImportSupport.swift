@@ -49,3 +49,44 @@ enum ImportErrorMessage {
         source == .video ? "No audio found in that video." : "No audio found in that file."
     }
 }
+
+/// UI state of the audio/video import task: drives the "Transcribing…" overlay and disables the
+/// import entry points while busy. Each import gets a token so a cancelled task that finishes late
+/// cannot clear the state of a newer import.
+struct ImportCoordinator: Equatable {
+    enum State: Equatable {
+        case idle
+        case importing(ImportSource)
+    }
+
+    private(set) var state: State = .idle
+    private var token: UUID?
+
+    var isImporting: Bool { state != .idle }
+
+    /// Starts an import; nil when one is already running (the caller must not start another).
+    mutating func begin(_ source: ImportSource) -> UUID? {
+        guard !isImporting else { return nil }
+        let id = UUID()
+        token = id
+        state = .importing(source)
+        return id
+    }
+
+    /// Ends the import started with `id`; ignored if that import was already cancelled/replaced.
+    mutating func finish(_ id: UUID) {
+        guard token == id else { return }
+        cancel()
+    }
+
+    /// Ends whatever is running (user pressed Cancel).
+    mutating func cancel() {
+        token = nil
+        state = .idle
+    }
+
+    /// Notice for a file that decoded to no audio at all.
+    static func emptyAudioNotice(for source: ImportSource) -> String {
+        ImportErrorMessage.emptyAudio(source)
+    }
+}
