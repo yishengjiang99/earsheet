@@ -219,8 +219,7 @@ final class ListeningSession: ObservableObject {
                                     audioFileName: audioFileName)
                     // Shown in place with a non-blocking "Not saved" banner (no alert or auto
                     // paywall over the take); the paywall opens from the banner.
-                    self.pendingTake = take
-                    self.phase = .done(take)
+                    self.holdTake(take)
                 } else {
                     let take = self.library.addTake(score: score, events: notes,
                                                       audioFileName: audioFileName)
@@ -292,6 +291,20 @@ final class ListeningSession: ObservableObject {
         start()
     }
 
+    /// Keeps a finished take out of the library (free save limit) and shows it in place.
+    func holdTake(_ take: Take) {
+        pendingTake = take
+        phase = .done(take)
+    }
+
+    /// Discards the held take for good: its session WAV is deleted and the hold cleared.
+    func discardPending() {
+        guard let take = pendingTake else { return }
+        pendingTake = nil
+        saveLimitReached = false
+        library.discardHeld(take)
+    }
+
     /// True while the finished take is held by the free save limit (not in the library yet).
     var holdsPendingTake: Bool { pendingTake != nil }
 
@@ -337,6 +350,7 @@ struct ListeningView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmReRecord = false
     @State private var confirmCancel = false
+    @State private var confirmLeaveHeld = false
     @State private var debugShareItems: [Any] = []
     @State private var showDebugShare = false
 
@@ -374,7 +388,7 @@ struct ListeningView: View {
             }
             if showsHeldTake {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { dismiss() }) {
+                    Button(action: { confirmLeaveHeld = true }) {
                         Label("Library", systemImage: "chevron.left")
                             .labelStyle(.titleAndIcon)
                     }
@@ -398,6 +412,16 @@ struct ListeningView: View {
         .onChange(of: session.phase) { _, phase in
             if case .done(let take) = phase, !session.holdsPendingTake { onSaved?(take) }
             if case .cancelled = phase { dismiss() }
+        }
+        .confirmationDialog("This take isn't saved", isPresented: $confirmLeaveHeld, titleVisibility: .visible) {
+            Button("Discard", role: .destructive) {
+                session.discardPending()
+                dismiss()
+            }
+            Button("Keep it with Pro") { session.saveLimitReached = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Free keeps \(ProStore.freeSaveLimit) pieces. Leaving now discards this take.")
         }
         .confirmationDialog("Discard this recording?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Discard recording", role: .destructive) { session.cancel() }
