@@ -52,6 +52,7 @@ struct LibraryView: View {
                                 .listRowBackground(Ink.paper)
                                 .listRowSeparator(.hidden)
                         }
+                        saveMeter
                         if library.userTakes.isEmpty {
                             Text("No takes yet — tap the microphone and play something.")
                                 .foregroundStyle(.secondary)
@@ -274,6 +275,21 @@ struct LibraryView: View {
     /// What the shared upgrade-prompt policy needs to know about the Library right now.
     private var promptContext: UpgradePromptContext {
         UpgradePromptContext(proStore: proStore, finishedTakes: library.userTakes.count, isRecording: showListening)
+    }
+
+    @ViewBuilder private var saveMeter: some View {
+        let summary = SaveQuotaSummary(isPro: proStore.isPro, count: library.userTakes.count)
+        if summary.isVisible {
+            SaveMeterRow(summary: summary, onOpenPlans: openMeterPlans)
+                .listRowBackground(Ink.paper)
+        }
+    }
+
+    /// The meter is passive: a tap goes through the policy as user-initiated (never counted).
+    private func openMeterPlans() {
+        guard triggers.decision(.meter, userInitiated: true, context: promptContext).isShow else { return }
+        Telemetry.shared.track(.softPromptTapped, ["kind": "meter"])
+        presentPaywall(.meter, automatic: false)
     }
 
     private func presentPaywall(_ trigger: PaywallTriggers.Trigger, automatic: Bool) {
