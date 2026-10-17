@@ -171,9 +171,6 @@ final class ListeningSession: ObservableObject {
         }
         finalSamples = samples
         canDebugExport = true
-        // Persist the session PCM with the take so the take's Export screen can
-        // share exactly what the mic heard (nil when the write fails).
-        let audioFileName = SessionDebugExport.persistSessionAudio(samples)
         if dueToLimit {
             notice = "Reached the \(Int(Transcriber.maxDurationSeconds))-second recording limit — here is your take."
         }
@@ -199,33 +196,33 @@ final class ListeningSession: ObservableObject {
                 }
                 return
             }
-            let score = Quantizer.quantize(notes)
             Task { @MainActor [weak self] in
-                Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": score.notes.isEmpty ? "no_notes" : "ok",
-                                                            "duration_s": durationS, "notes": score.notes.count])
-                guard let self else { return }
-                self.finalNotes = notes
-                if score.notes.isEmpty {
-                    self.phase = .failed("No notes found. Try again, closer to the music.")
-                } else if SaveGate.decision(isPro: self.proStore.isPro, savedCount: self.library.userTakes.count) == .held {
-                    // Free limit reached: the take is written and viewable,
-                    // but keeping it requires Pro.
-                    let take = Take(id: UUID(),
-                                    title: "Take \(self.library.takes.count + 1)",
-                                    createdAt: Date(),
-                                    score: score,
-                                    isSample: false,
-                                    events: notes,
-                                    audioFileName: audioFileName)
-                    // Shown in place with a non-blocking "Not saved" banner (no alert or auto
-                    // paywall over the take); the paywall opens from the banner.
-                    self.holdTake(take)
-                } else {
-                    let take = self.library.addTake(score: score, events: notes,
-                                                      audioFileName: audioFileName)
-                    self.phase = .done(take)
-                }
+                self?.complete(notes: notes, samples: samples, durationS: durationS)
             }
+        }
+    }
+
+    /// Turns the finalized notes into a take: saved to the library, or held at the free save limit.
+    /// The session WAV is written only here, once a take exists, so failures and discards leave no file.
+    func complete(notes: [NoteEvent], samples: [Float], durationS: Double) {
+        let score = Quantizer.quantize(notes)
+        Telemetry.shared.track(.transcriptionStop, ["source": "mic", "result": score.notes.isEmpty ? "no_notes" : "ok",
+                                                    "duration_s": durationS, "notes": score.notes.count])
+        finalNotes = notes
+        guard !score.notes.isEmpty else {
+            phase = .failed("No notes found. Try again, closer to the music.")
+            return
+        }
+        // Keep the session PCM with the take so its Export screen can share exactly what the mic heard
+        // (nil when the write fails).
+        let audioFileName = SessionDebugExport.persistSessionAudio(samples)
+        if SaveGate.decision(isPro: proStore.isPro, savedCount: library.userTakes.count) == .held {
+            // Free limit reached: the take is written and viewable, but keeping it requires Pro.
+            // Shown in place with a non-blocking "Not saved" banner (no alert or auto paywall over
+            // the take); the paywall opens from the banner.
+            holdTake(library.makeTake(score: score, events: notes, audioFileName: audioFileName))
+        } else {
+            phase = .done(library.addTake(score: score, events: notes, audioFileName: audioFileName))
         }
     }
 

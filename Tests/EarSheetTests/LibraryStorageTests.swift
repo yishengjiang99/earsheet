@@ -110,4 +110,44 @@ final class LibraryStorageTests: XCTestCase {
         XCTAssertNil(library.notice)
         XCTAssertTrue(try corruptBackups(in: dir).isEmpty)
     }
+
+    // MARK: - Orphaned session WAVs (F7.3)
+
+    func testSweepRemovesUnreferencedWavsKeepsReferenced() throws {
+        let dir = try makeTempDirectory()
+        let kept = "kept.wav", orphan = "orphan.wav", other = "notes.txt"
+        for name in [kept, orphan, other] { try Data([1]).write(to: dir.appendingPathComponent(name)) }
+
+        let removed = TakeLibrary.sweepUnreferencedAudio(in: dir, keeping: [kept])
+
+        XCTAssertEqual(removed, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent(kept).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent(orphan).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent(other).path), "only WAVs are swept")
+    }
+
+    func testLaunchSweepKeepsWavsReferencedByTakes() throws {
+        let dir = try makeTempDirectory()
+        var take = makeTake("Has audio")
+        take.audioFileName = "referenced.wav"
+        try JSONEncoder().encode([take]).write(to: dir.appendingPathComponent("takes.json"))
+        try Data([1]).write(to: dir.appendingPathComponent("referenced.wav"))
+        try Data([1]).write(to: dir.appendingPathComponent("orphan.wav"))
+
+        _ = TakeLibrary(directory: dir)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("referenced.wav").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("orphan.wav").path))
+    }
+
+    func testLaunchSweepSkippedWhenLibraryFileIsUnreadable() throws {
+        let dir = try makeTempDirectory()
+        try Data("garbage".utf8).write(to: dir.appendingPathComponent("takes.json"))
+        try Data([1]).write(to: dir.appendingPathComponent("maybe-referenced.wav"))
+
+        _ = TakeLibrary(directory: dir)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("maybe-referenced.wav").path),
+                      "references are unknown, so nothing is deleted")
+    }
 }
