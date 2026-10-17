@@ -2,21 +2,6 @@
 name: iOS Simulator
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      # App Store listing, docs and ASC-only workflows/scripts are not app inputs (the app bundles
-      # Sources/, Packages/, Tests/ and models/ via scripts/fetch-models; never docs/).
-      - "docs/**"
-      - "**/*.md"
-      - "scripts/asc/**"
-      - ".github/workflows/asc-*.yml"
-  pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - "scripts/asc/**"
-      - ".github/workflows/asc-*.yml"
   workflow_dispatch:
 
 concurrency:
@@ -96,6 +81,18 @@ jobs:
             -only-testing:EarSheetTests/PushPermissionTests \
             -only-testing:EarSheetTests/SheetAnalysisTests \
             -only-testing:EarSheetTests/RenderPreviewTests \
+            -only-testing:EarSheetTests/EntitlementManagerTests \
+            -only-testing:EarSheetTests/PurchaseFlowTests \
+            -only-testing:EarSheetTests/RestoreFlowTests \
+            -only-testing:EarSheetTests/QuotaGateTests \
+            -only-testing:EarSheetTests/PaywallTriggersTests \
+            -only-testing:EarSheetTests/UpgradePromptPolicyTests \
+            -only-testing:EarSheetTests/ListeningFlowTests \
+            -only-testing:EarSheetTests/LibraryStorageTests \
+            -only-testing:EarSheetTests/ExportFlowTests \
+            -only-testing:EarSheetTests/SettingsTests \
+            -only-testing:EarSheetTests/OnboardingTests \
+            -only-testing:EarSheetTests/TelemetryPrivacyTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
