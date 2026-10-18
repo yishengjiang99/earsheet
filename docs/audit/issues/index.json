@@ -1,0 +1,619 @@
+[
+ {
+  "id": "F9.4",
+  "sev": "P1",
+  "title": "[F9.4] Audio-file import bypasses the 3-piece free save limit (no paywall, unlimited free saves)",
+  "labels": [
+   "audit",
+   "bug",
+   "P1",
+   "flow:F9",
+   "area:quota",
+   "stream:B"
+  ],
+  "file": "issues/F9.4-audio-import-bypasses-save-limit.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "P1.5",
+  "sev": "P1",
+  "title": "[P1.5] Paywall/review notes promise \"free: first 30 s, Pro: full-length\" imports but neither limit exists (all files up to 60 s are free, longer fail for everyone)",
+  "labels": [
+   "audit",
+   "bug",
+   "P1",
+   "flow:P1",
+   "area:paywall",
+   "stream:B"
+  ],
+  "file": "issues/P1.5-free-30s-import-not-implemented.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F9.6",
+  "sev": "P2",
+  "title": "[F9.6] Import failures show one generic message: >60 s files, videos without audio and conversion errors are indistinguishable",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F9",
+   "area:scan",
+   "stream:B"
+  ],
+  "file": "issues/F9.6-import-errors-generic.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "P7.4",
+  "sev": "P1",
+  "title": "[P7.4] Pro stays unlocked after the subscription expires until the app is relaunched",
+  "labels": [
+   "audit",
+   "bug",
+   "P1",
+   "flow:P7",
+   "area:iap",
+   "stream:A"
+  ],
+  "file": "issues/P7.4-pro-stays-after-expiry-until-relaunch.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P5.3",
+  "sev": "P2",
+  "title": "[P5.3] Ask to Buy approval does not close the open paywall (user stays on the purchase screen while already Pro)",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:P5",
+   "area:paywall",
+   "stream:A"
+  ],
+  "file": "issues/P5.3-paywall-stays-open-after-ask-to-buy-approval.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P2.8",
+  "sev": "P2",
+  "title": "[P2.8] Settings \"Go Pro\" opens the full purchase paywall even when the user already has Pro (can buy a second product)",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:P2",
+   "area:paywall",
+   "stream:A"
+  ],
+  "file": "issues/P2.8-pro-user-can-reopen-purchase-paywall.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P6.2",
+  "sev": "P2",
+  "title": "[P6.2] Restore Purchases in Settings gives no feedback (no success, no \"nothing found\", no failure message)",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:P6",
+   "area:iap",
+   "stream:A"
+  ],
+  "file": "issues/P6.2-settings-restore-no-feedback.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P6.4",
+  "sev": "P2",
+  "title": "[P6.4] Cancelling the App Store sign-in during Restore shows \"Restore failed: <raw system text>\"",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:P6",
+   "area:iap",
+   "stream:A"
+  ],
+  "file": "issues/P6.4-restore-signin-cancel-shown-as-failure.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P4.2",
+  "sev": "P3",
+  "title": "[P4.2] Purchase failures show raw system text; an unverified transaction shows \"The operation couldn't be completed (EarSheet.ProStoreError error 0)\"",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:P4",
+   "area:iap",
+   "stream:A"
+  ],
+  "file": "issues/P4.2-purchase-errors-raw-and-unverified-indistinct.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "P10.2",
+  "sev": "P3",
+  "title": "[P10.2] Purchase funnel analytics log cancel and Ask-to-Buy pending as `purchase_fail`, and there are no paywall dismiss/trigger/restore-tap events",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:P10",
+   "area:telemetry",
+   "stream:A"
+  ],
+  "file": "issues/P10.2-funnel-events-mislabeled-incomplete.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "F3.3",
+  "sev": "P2",
+  "title": "[F3.3] Microphone permission denied: message says \"Enable it in Settings\" but offers no Open Settings button, only \"Back to library\"",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F3",
+   "area:capture",
+   "stream:B"
+  ],
+  "file": "issues/F3.3-mic-denied-dead-end.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F4.3",
+  "sev": "P2",
+  "title": "[F4.3] Transcription pump failure shows an error but the microphone keeps recording",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F4",
+   "area:capture",
+   "stream:B"
+  ],
+  "file": "issues/F4.3-pump-failure-leaves-mic-running.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F4.7",
+  "sev": "P2",
+  "title": "[F4.7] No way to cancel a listening session: the only control is Stop, which saves a take (and consumes a free slot); nothing at all during \"Warming up\u2026\"",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F4",
+   "area:capture",
+   "stream:B"
+  ],
+  "file": "issues/F4.7-no-cancel-or-discard-while-listening.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F5.6",
+  "sev": "P1",
+  "title": "[F5.6] Unsaved (held) take is silently discarded by the \"Library\" back button",
+  "labels": [
+   "audit",
+   "bug",
+   "P1",
+   "flow:F5",
+   "area:quota",
+   "stream:B"
+  ],
+  "file": "issues/F5.6-held-take-discarded-without-confirmation.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F7.3",
+  "sev": "P2",
+  "title": "[F7.3] Session WAV files are written before the outcome is known and leak (~2.6 MB per 60 s) after failed, held-and-discarded or restarted sessions",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F7",
+   "area:library",
+   "stream:B"
+  ],
+  "file": "issues/F7.3-orphaned-session-wav-files.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F7.1",
+  "sev": "P2",
+  "title": "[F7.1] An unreadable takes.json silently empties the Library and the next save overwrites it for good; write failures are never shown",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F7",
+   "area:library",
+   "stream:B"
+  ],
+  "file": "issues/F7.1-library-load-save-errors-silent.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F9.2",
+  "sev": "P2",
+  "title": "[F9.2] Importing audio/video shows no progress at all, cannot be cancelled, and an empty/silent file returns silently",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F9",
+   "area:scan",
+   "stream:B"
+  ],
+  "file": "issues/F9.2-import-no-progress-silent-empty.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F9.5",
+  "sev": "P2",
+  "title": "[F9.5] At the free limit, a held imported piece is invisible: dismissing the paywall (or the suppressed-paywall notice) leaves it unrecoverable, a later import silently replaces it, and a later Pro flip pops it up unexpectedly",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F9",
+   "area:quota",
+   "stream:B"
+  ],
+  "file": "issues/F9.5-held-imported-piece-invisible-or-lost.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F9.8",
+  "sev": "P3",
+  "title": "[F9.8] Picked audio/MIDI/video temp copies are never (or only sometimes) deleted",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F9",
+   "area:library",
+   "stream:B"
+  ],
+  "file": "issues/F9.8-picked-file-copies-never-deleted.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F10.3",
+  "sev": "P2",
+  "title": "[F10.3] MP3 export shows no progress; `isPreparing` is set but never read, so the row can be tapped repeatedly and starts parallel renders",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F10",
+   "area:audio",
+   "stream:C"
+  ],
+  "file": "issues/F10.3-mp3-export-no-progress-double-start.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "F10.6",
+  "sev": "P3",
+  "title": "[F10.6] Export file names drop every non-ASCII character: a take titled \"\u591c\u66f2\" exports as \".pdf\" / \".mid\" (empty base name)",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F10",
+   "area:library",
+   "stream:C"
+  ],
+  "file": "issues/F10.6-export-filename-strips-non-latin.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "F10.7",
+  "sev": "P3",
+  "title": "[F10.7] Developer \"Debug export\" UI ships to everyone and silently overwrites the clipboard with the full note JSON",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F10",
+   "area:library",
+   "stream:B"
+  ],
+  "file": "issues/F10.7-debug-export-ui-and-clipboard-in-production.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F12.6",
+  "sev": "P2",
+  "title": "[F12.6] Settings \"Measure now\" never checks microphone permission and fails silently",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F12",
+   "area:settings",
+   "stream:A"
+  ],
+  "file": "issues/F12.6-measure-now-silent-failure.md",
+  "stream": "A",
+  "kind": "bug"
+ },
+ {
+  "id": "F4.6",
+  "sev": "P2",
+  "title": "[F4.6] Backgrounding or locking the phone while listening is unhandled (no scenePhase logic, no background audio mode); interruptions are invisible",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:F4",
+   "area:capture",
+   "stream:B"
+  ],
+  "file": "issues/F4.6-no-handling-when-app-backgrounds-while-recording.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F4.4",
+  "sev": "P3",
+  "title": "[F4.4] The \"Reached the 60-second recording limit\" notice is set during writing and is dismissed with the screen, so the user is never told why recording stopped",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F4",
+   "area:capture",
+   "stream:B"
+  ],
+  "file": "issues/F4.4-sixty-second-limit-notice-not-visible.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "P10.4",
+  "sev": "P1",
+  "title": "[P10.4] No PrivacyInfo.xcprivacy in the app target although the app uses UserDefaults and sends anonymous usage/purchase data",
+  "labels": [
+   "audit",
+   "bug",
+   "P1",
+   "flow:P10",
+   "area:docs",
+   "stream:C"
+  ],
+  "file": "issues/P10.4-missing-privacy-manifest.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "P11.1",
+  "sev": "P2",
+  "title": "[P11.1] App Review notes point to the wrong Settings position, repeat the unimplemented \"full-length imports\" claim, and give no microphone/no-mic test guidance",
+  "labels": [
+   "audit",
+   "bug",
+   "P2",
+   "flow:P11",
+   "area:docs",
+   "stream:C"
+  ],
+  "file": "issues/P11.1-review-notes-drift.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "P11.2",
+  "sev": "P3",
+  "title": "[P11.2] Store copy says it \"writes the score live\" / \"Live Audio to Sheet Music\" but the live screen shows a piano roll only; the staff appears after Stop (owner decision)",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:P11",
+   "area:docs",
+   "stream:C"
+  ],
+  "file": "issues/P11.2-store-copy-claims-live-score.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "F2.5",
+  "sev": "P3",
+  "title": "[F2.5] New takes can get a duplicate default title (\"Take 3\" twice) after a delete",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F2",
+   "area:library",
+   "stream:B"
+  ],
+  "file": "issues/F2.5-duplicate-take-titles.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "P1.8",
+  "sev": "P3",
+  "title": "[P1.8] Dismissing a paywall the user opened themselves (\"Keep it\" banner / dialog) counts toward the automatic-prompt caps",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:P1",
+   "area:paywall",
+   "stream:B"
+  ],
+  "file": "issues/P1.8-user-initiated-paywall-dismiss-counted-toward-caps.md",
+  "stream": "B",
+  "kind": "bug"
+ },
+ {
+  "id": "F13.1",
+  "sev": "P3",
+  "title": "[F13.1] Raw Swift/Foundation error descriptions are interpolated into user-facing messages",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F13",
+   "area:docs",
+   "stream:C"
+  ],
+  "file": "issues/F13.1-raw-error-strings-shown-to-users.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "F1.5",
+  "sev": "P3",
+  "title": "[F1.5] Onboarding says \"Nothing ever leaves your phone\" but the app sends a device record, usage events (default on) and purchase transactions",
+  "labels": [
+   "audit",
+   "bug",
+   "P3",
+   "flow:F1",
+   "area:docs",
+   "stream:C"
+  ],
+  "file": "issues/F1.5-onboarding-copy-nothing-leaves-phone.md",
+  "stream": "C",
+  "kind": "bug"
+ },
+ {
+  "id": "P1.9",
+  "sev": "ENH",
+  "title": "[P1.9] Enhancement (product decision): one shared upgrade-prompt policy wired to every designed trigger (save limit, import limit, export locked row, 3rd transcription, settings) with Pro/in-flight/first-session suppression",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P1",
+   "area:paywall",
+   "stream:D"
+  ],
+  "file": "issues/P1.9-shared-upgrade-prompt-policy-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P1.11",
+  "sev": "ENH",
+  "title": "[P1.11] Enhancement (product decision): when a free user imports a file longer than 30 s, offer \"Write the first 30 s free\" or \"Try Pro\" before transcribing (design screen 7)",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P1",
+   "area:scan",
+   "stream:D"
+  ],
+  "file": "issues/P1.11-import-over-30s-prompt-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P2.1",
+  "sev": "ENH",
+  "title": "[P2.1] Enhancement (product decision): soft \"Export this as MIDI & MusicXML\" interstitial (with a free-PDF alternative) before the full paywall on the first export",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P2",
+   "area:paywall",
+   "stream:D"
+  ],
+  "file": "issues/P2.1-soft-interstitial-before-locked-export-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P1.12",
+  "sev": "ENH",
+  "title": "[P1.12] Enhancement (product decision): dismissible inline Library card after the 3rd saved piece (rank 4: shows once, may return once after 14 days)",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P1",
+   "area:paywall",
+   "stream:D"
+  ],
+  "file": "issues/P1.12-third-transcription-library-card-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P1.10",
+  "sev": "ENH",
+  "title": "[P1.10] Enhancement (product decision): show how many free saves are left (\"2 of 3 pieces saved\") in the Library, with a gentle note on the last free slot",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P1",
+   "area:quota",
+   "stream:D"
+  ],
+  "file": "issues/P1.10-remaining-saves-counter-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P3.5",
+  "sev": "ENH",
+  "title": "[P3.5] Enhancement (product decision): after a purchase show a short confirmation (plan, trial end date if any) and resume the export the user tapped",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P3",
+   "area:paywall",
+   "stream:D"
+  ],
+  "file": "issues/P3.5-post-purchase-confirmation-and-resume-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ },
+ {
+  "id": "P9.4",
+  "sev": "ENH",
+  "title": "[P9.4] Enhancement (product decision): Pro status detail (plan, renews/expires date) in Settings and a quiet \"Go Pro\" entry in the Library toolbar for free users",
+  "labels": [
+   "audit",
+   "enhancement",
+   "flow:P9",
+   "area:settings",
+   "stream:D"
+  ],
+  "file": "issues/P9.4-pro-status-detail-and-quiet-entry-ENH.md",
+  "stream": "D",
+  "kind": "enh"
+ }
+]
