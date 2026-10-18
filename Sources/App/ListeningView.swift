@@ -54,6 +54,7 @@ final class ListeningSession: ObservableObject {
     private let finalizeNotes: NoteFinalizer
     /// The in-flight permission + warm-up task (tests await it).
     private(set) var startTask: Task<Void, Never>?
+    private var startTaskToken = UUID()
     private var streamer: StreamingTranscriber?
     private let pumpQueue = DispatchQueue(label: "com.ragnus.pnge.stream-pump")
     private var timer: Timer?
@@ -84,10 +85,13 @@ final class ListeningSession: ObservableObject {
         case .preparing, .permissionDenied: break
         default: return
         }
-        guard startTask == nil else { return }
+        // A denied attempt has already finished its work, so a stale handle never blocks the retry.
+        guard startTask == nil || phase == .permissionDenied else { return }
+        let token = UUID()
+        startTaskToken = token
         startTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.startTask = nil }
+            defer { if self.startTaskToken == token { self.startTask = nil } }
             let granted = await self.requestMicPermission()
             guard self.phase != .cancelled else { return }
             guard granted else {
