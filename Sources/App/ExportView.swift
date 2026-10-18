@@ -12,7 +12,13 @@ struct ExportView: View {
     @ObservedObject var proStore: ProStore
     @Environment(\.dismiss) private var dismiss
 
+    @Environment(\.paywallTriggers) private var triggers
     @State private var showPaywall = false
+    @State private var paywallTrigger: PaywallTriggers.Trigger = .exportLockedRow
+    @State private var interstitial: ExportInterstitialFlow.Entry?
+    @State private var presentedEntry: ExportInterstitialFlow.Entry?
+    @State private var interstitialResult: InterstitialResult?
+    @State private var checkedFirstShare = false
     @State private var shareItems: [Any] = []
     @State private var showShare = false
     @StateObject private var exporter = ExportCoordinator()
@@ -82,9 +88,16 @@ struct ExportView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showPaywall) {
-                PaywallView(store: proStore)
+            .sheet(item: $interstitial, onDismiss: interstitialDismissed) { _ in
+                ExportInterstitialView(take: take, score: score, proStore: proStore,
+                                       onSeePlans: { closeInterstitial(.plans) },
+                                       onFreePDF: { closeInterstitial(.freePDF) },
+                                       onClose: { closeInterstitial(.closed) })
             }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView(store: proStore, trigger: paywallTrigger.analyticsName)
+            }
+            .task { await presentFirstShareInterstitialIfNeeded() }
             .sheet(isPresented: $showShare) {
                 ShareSheet(items: shareItems)
             }
@@ -125,6 +138,57 @@ struct ExportView: View {
         }
     }
 
+    // MARK: - Soft upgrade interstitial
+
+    private enum InterstitialResult { case plans, freePDF, closed }
+
+    private var purchaseActive: Bool { proStore.purchaseActive }
+
+    /// A tap on a locked row: the soft sheet first (never counted), the paywall from "Try Pro".
+    private func requestProFormat(_ format: ExportFormat) {
+        guard let entry = ExportInterstitialFlow.entryForLockedRow(format, isPro: proStore.isPro,
+                                                                    purchaseActive: purchaseActive,
+                                                                    triggers: triggers) else { return }
+        presentedEntry = entry
+        interstitial = entry
+    }
+
+    /// First open of the export sheet on the first finished take (policy permitting).
+    private func presentFirstShareInterstitialIfNeeded() async {
+        guard !checkedFirstShare else { return }
+        checkedFirstShare = true
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        guard !Task.isCancelled, interstitial == nil, !showPaywall, !showShare,
+              let entry = ExportInterstitialFlow.entryOnOpen(isSample: take.isSample, isPro: proStore.isPro,
+                                                              purchaseActive: purchaseActive,
+                                                              triggers: triggers) else { return }
+        presentedEntry = entry
+        interstitial = entry
+    }
+
+    private func closeInterstitial(_ result: InterstitialResult) {
+        interstitialResult = result
+        interstitial = nil
+    }
+
+    /// Runs after the interstitial is gone, so the paywall or share sheet never fights its dismissal.
+    private func interstitialDismissed() {
+        guard let entry = presentedEntry else { return }
+        presentedEntry = nil
+        let result = interstitialResult ?? .closed
+        interstitialResult = nil
+        ExportInterstitialFlow.closed(entry, tookPlans: result == .plans, isPro: proStore.isPro, triggers: triggers)
+        switch result {
+        case .plans:
+            paywallTrigger = entry.trigger
+            showPaywall = true
+        case .freePDF:
+            exportPDF()
+        case .closed:
+            break
+        }
+    }
+
     // MARK: - Exports
 
     private func exportPDF() {
@@ -133,12 +197,12 @@ struct ExportView: View {
     }
 
     private func exportMIDI() {
-        guard proStore.isPro else { showPaywall = true; return }
+        guard proStore.isPro else { requestProFormat(.midi); return }
         shareFile(name: "\(baseName).mid", data: MIDISupport.data(for: score))
     }
 
     private func exportMusicXML() {
-        guard proStore.isPro else { showPaywall = true; return }
+        guard proStore.isPro else { requestProFormat(.musicXML); return }
         shareFile(name: "\(baseName).musicxml", data: Data(MusicXMLWriter.xml(score: score).utf8))
     }
 

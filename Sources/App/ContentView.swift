@@ -17,6 +17,7 @@ struct ContentView: View {
                 OnboardingView(onDone: { hasSeenOnboarding = true })
             }
         }
+        .environment(\.paywallTriggers, triggers)
         .preferredColorScheme(.light)
         .task {
             await proStore.refreshEntitlement()
