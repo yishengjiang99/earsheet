@@ -19,6 +19,9 @@ struct ExportView: View {
     @State private var presentedEntry: ExportInterstitialFlow.Entry?
     @State private var interstitialResult: InterstitialResult?
     @State private var checkedFirstShare = false
+    @State private var resume = ExportResume()
+    @State private var resumeAfterPaywall: ExportFormat?
+    @State private var proBanner: String?
     @State private var shareItems: [Any] = []
     @State private var showShare = false
     @StateObject private var exporter = ExportCoordinator()
@@ -94,9 +97,14 @@ struct ExportView: View {
                                        onFreePDF: { closeInterstitial(.freePDF) },
                                        onClose: { closeInterstitial(.closed) })
             }
-            .sheet(isPresented: $showPaywall) {
+            .sheet(isPresented: $showPaywall, onDismiss: paywallDismissed) {
                 PaywallView(store: proStore, trigger: paywallTrigger.analyticsName)
             }
+            .onChange(of: proStore.isPro) { wasPro, isPro in proChanged(wasPro: wasPro, isPro: isPro) }
+            .onChange(of: showPaywall) { _, showing in
+                if !showing && !proStore.isPro { resume.cancel() }
+            }
+            .proConfirmationBanner($proBanner)
             .task { await presentFirstShareInterstitialIfNeeded() }
             .sheet(isPresented: $showShare) {
                 ShareSheet(items: shareItems)
@@ -181,11 +189,41 @@ struct ExportView: View {
         switch result {
         case .plans:
             paywallTrigger = entry.trigger
+            if let format = entry.format { resume.request(format) }
             showPaywall = true
         case .freePDF:
             exportPDF()
         case .closed:
             break
+        }
+    }
+
+    // MARK: - After a purchase
+
+    /// Pro turned on while Export is open: confirm in one line and run the export the user tapped,
+    /// once. The paywall closes itself on the entitlement change; the export waits for it to be gone.
+    private func proChanged(wasPro: Bool, isPro: Bool) {
+        guard !wasPro, isPro else { return }
+        proBanner = proStore.proStatus?.confirmation() ?? "Pro is on."
+        guard let format = resume.proChanged(wasPro: wasPro, isPro: isPro) else { return }
+        if showPaywall {
+            resumeAfterPaywall = format
+        } else {
+            runResumed(format)
+        }
+    }
+
+    private func paywallDismissed() {
+        guard let format = resumeAfterPaywall else { return }
+        resumeAfterPaywall = nil
+        runResumed(format)
+    }
+
+    private func runResumed(_ format: ExportFormat) {
+        Telemetry.shared.track(.exportResumed, ["source": format.analyticsName])
+        switch format {
+        case .midi: exportMIDI()
+        case .musicXML: exportMusicXML()
         }
     }
 

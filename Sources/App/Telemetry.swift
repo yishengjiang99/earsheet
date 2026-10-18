@@ -67,6 +67,8 @@ final class Telemetry: @unchecked Sendable {
         case softPromptShown = "soft_prompt_shown"
         case softPromptTapped = "soft_prompt_tapped"
         case softPromptDismissed = "soft_prompt_dismissed"
+        /// After a purchase from a locked export row, the tapped export ran (`source` = the format).
+        case exportResumed = "export_resumed"
     }
 
     /// The only property keys that may leave the phone.
