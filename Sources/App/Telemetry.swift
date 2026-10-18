@@ -63,11 +63,15 @@ final class Telemetry: @unchecked Sendable {
         case restore = "restore"
         /// An automatic upgrade prompt was held back by the shared policy (`trigger`, `reason`).
         case paywallTriggerSuppressed = "paywall_trigger_suppressed"
+        /// A soft upgrade surface (sheet, card) appeared / was tapped / was closed (`kind`, `result`).
+        case softPromptShown = "soft_prompt_shown"
+        case softPromptTapped = "soft_prompt_tapped"
+        case softPromptDismissed = "soft_prompt_dismissed"
     }
 
     /// The only property keys that may leave the phone.
     static let allowedPropertyKeys: Set<String> = [
-        "cold", "source", "duration_s", "notes", "product", "reason", "code", "result", "restored", "trigger",
+        "cold", "source", "duration_s", "notes", "product", "reason", "code", "result", "restored", "trigger", "kind",
     ]
     static let maxQueued = 5000
     static let batchSize = 100
