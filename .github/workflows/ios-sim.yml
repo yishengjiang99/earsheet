@@ -93,6 +93,7 @@ jobs:
             -only-testing:EarSheetTests/SettingsTests \
             -only-testing:EarSheetTests/OnboardingTests \
             -only-testing:EarSheetTests/TelemetryPrivacyTests \
+            -only-testing:EarSheetTests/DebugExportRemovalTests \
             -destination "${{ steps.sim.outputs.destination }}" \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
