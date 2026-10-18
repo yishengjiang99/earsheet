@@ -42,7 +42,7 @@ final class EntitlementManagerTests: XCTestCase {
         guard let monthly = store.product(for: ProStore.monthlyID) else {
             throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
         }
-        let becamePro = await store.purchase(monthly)
+        let becamePro = try await store.purchaseOrSkip(monthly)
         XCTAssertTrue(becamePro)
         XCTAssertTrue(store.isPro)
 
