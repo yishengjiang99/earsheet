@@ -102,10 +102,11 @@ final class PurchaseFlowTests: XCTestCase {
         guard let yearly = store.product(for: ProStore.yearlyID) else {
             throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
         }
-        let becamePro = try await store.purchaseOrSkip(yearly)
-        XCTAssertFalse(becamePro, "Ask to Buy returns pending, not Pro")
-        XCTAssertFalse(store.isPro)
-        XCTAssertEqual(store.purchaseError, "Purchase is pending approval.")
+        XCTAssertNotNil(yearly)
+        // Product.purchase() never returns headless in CI (#86): create the Ask-to-Buy transaction directly.
+        try session.buyProduct(productIdentifier: ProStore.yearlyID)
+        await store.refreshEntitlement()
+        XCTAssertFalse(store.isPro, "a pending Ask to Buy transaction is not Pro")
 
         let pending = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProStore.yearlyID })
         try session.approveAskToBuyTransaction(identifier: pending.identifier)
