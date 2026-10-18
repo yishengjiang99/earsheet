@@ -63,15 +63,14 @@ final class RestoreFlowTests: XCTestCase {
 
         let store = ProStore(sync: {})
         await store.loadProducts(force: true)
-        guard let monthly = store.product(for: ProStore.monthlyID) else {
-            throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
-        }
+        XCTAssertNotNil(store.product(for: ProStore.monthlyID), "local StoreKit returned no products (\(store.productsError ?? "-"))")
         let none = await store.restore()
         XCTAssertEqual(none, .none, "a clean account has nothing to restore")
         XCTAssertFalse(store.isPro)
 
-        let bought = try await store.purchaseOrSkip(monthly)
-        XCTAssertTrue(bought)
+        try session.buyProduct(productIdentifier: ProStore.monthlyID) // Product.purchase() hangs headless (#86)
+        await store.refreshEntitlement()
+        XCTAssertTrue(store.isPro)
         let active = await store.restore()
         XCTAssertEqual(active, .restored, "restore on an active Pro account reports success")
     }

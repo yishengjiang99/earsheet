@@ -39,11 +39,10 @@ final class EntitlementManagerTests: XCTestCase {
 
         let store = ProStore()
         await store.loadProducts(force: true)
-        guard let monthly = store.product(for: ProStore.monthlyID) else {
-            throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
-        }
-        let becamePro = try await store.purchaseOrSkip(monthly)
-        XCTAssertTrue(becamePro)
+        XCTAssertNotNil(store.product(for: ProStore.monthlyID), "local StoreKit returned no products (\(store.productsError ?? "-"))")
+        // Product.purchase() never returns headless in CI (#86): buy through the test session instead.
+        try session.buyProduct(productIdentifier: ProStore.monthlyID)
+        await store.refreshEntitlement()
         XCTAssertTrue(store.isPro)
 
         try session.expireSubscription(productIdentifier: ProStore.monthlyID)
