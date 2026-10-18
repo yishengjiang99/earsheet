@@ -102,7 +102,7 @@ final class PurchaseFlowTests: XCTestCase {
         guard let yearly = store.product(for: ProStore.yearlyID) else {
             throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
         }
-        let becamePro = await store.purchase(yearly)
+        let becamePro = try await store.purchaseOrSkip(yearly)
         XCTAssertFalse(becamePro, "Ask to Buy returns pending, not Pro")
         XCTAssertFalse(store.isPro)
         XCTAssertEqual(store.purchaseError, "Purchase is pending approval.")

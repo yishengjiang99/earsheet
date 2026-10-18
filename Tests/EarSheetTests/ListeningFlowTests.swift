@@ -92,7 +92,7 @@ final class ListeningFlowTests: XCTestCase {
         XCTAssertNil(recorder.onSamples, "audio callbacks are detached")
         XCTAssertNil(recorder.onLevel)
         if case .failed(let message) = session.phase {
-            XCTAssertTrue(message.hasPrefix("Transcription failed"))
+            XCTAssertEqual(message, UserFacingError.copy(for: .transcription))
         } else {
             XCTFail("expected .failed, got \(session.phase)")
         }

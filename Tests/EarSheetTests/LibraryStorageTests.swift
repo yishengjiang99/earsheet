@@ -98,7 +98,7 @@ final class LibraryStorageTests: XCTestCase {
         XCTAssertNil(library.notice)
         _ = library.addTake(title: "Doomed", score: makeTake("x").score, events: nil)
         let notice = try XCTUnwrap(library.notice, "a failed write is reported, not swallowed")
-        XCTAssertTrue(notice.hasPrefix("Could not save your takes"))
+        XCTAssertEqual(notice, UserFacingError.copy(for: .saveLibrary))
     }
 
     func testHealthyFileLoadsWithoutNotice() throws {

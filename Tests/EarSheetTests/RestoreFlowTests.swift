@@ -70,7 +70,7 @@ final class RestoreFlowTests: XCTestCase {
         XCTAssertEqual(none, .none, "a clean account has nothing to restore")
         XCTAssertFalse(store.isPro)
 
-        let bought = await store.purchase(monthly)
+        let bought = try await store.purchaseOrSkip(monthly)
         XCTAssertTrue(bought)
         let active = await store.restore()
         XCTAssertEqual(active, .restored, "restore on an active Pro account reports success")

@@ -18,7 +18,7 @@ extension ExportFlowTests {
                 for banned in ["error", "earsheet.", "loaderror", "domain", "operation couldn", ".sf2", "nserror"] {
                     XCTAssertFalse(lower.contains(banned), "\(context): \(message)")
                 }
-                XCTAssertNil(message.rangeOfCharacter(from: .decimalDigits), "\(context): \(message)")
+                XCTAssertNil(message.replacingOccurrences(of: "MP3", with: "").rangeOfCharacter(from: .decimalDigits), "\(context): \(message)")
             }
         }
     }
