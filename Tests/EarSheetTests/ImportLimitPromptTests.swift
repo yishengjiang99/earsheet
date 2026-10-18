@@ -4,6 +4,13 @@ import XCTest
 
 /// Import-limit sheet (P1.11): when a free import is offered the choice, and the gate the import task waits on.
 extension UpgradePromptPolicyTests {
+    /// Yields until `condition` holds; bounded so a regression fails the test instead of hanging CI.
+    func spin(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        var spins = 0
+        while !condition(), spins < 10_000 { await Task.yield(); spins += 1 }
+        XCTAssertTrue(condition(), "condition not reached", file: file, line: line)
+    }
+
     func testLongFreeImportPromptsAndOthersGoStraightThrough() {
         XCTAssertEqual(ImportLimitPrompt.decision(durationSeconds: 45, isPro: false), .prompt)
         XCTAssertEqual(ImportLimitPrompt.decision(durationSeconds: 30.5, isPro: false), .prompt)
@@ -34,7 +41,7 @@ extension UpgradePromptPolicyTests {
     func testGateReturnsTheChoice() async {
         let gate = ImportLimitGate()
         let task = Task { await gate.ask(durationSeconds: 48) }
-        while gate.request == nil { await Task.yield() }
+        await spin { gate.request != nil }
         XCTAssertEqual(gate.request?.durationSeconds, 48)
         gate.resolve(.writeFirstFree)
         let choice = await task.value
@@ -46,7 +53,7 @@ extension UpgradePromptPolicyTests {
     func testGateCancelledWhenTheImportTaskIsCancelled() async {
         let gate = ImportLimitGate()
         let task = Task { await gate.ask(durationSeconds: 40) }
-        while gate.request == nil { await Task.yield() }
+        await spin { gate.request != nil }
         task.cancel()
         let choice = await task.value
         XCTAssertEqual(choice, .cancel)
@@ -56,12 +63,12 @@ extension UpgradePromptPolicyTests {
     func testNewAskSupersedesThePendingOne() async {
         let gate = ImportLimitGate()
         let first = Task { await gate.ask(durationSeconds: 40) }
-        while gate.request == nil { await Task.yield() }
+        await spin { gate.request != nil }
         let firstID = gate.request?.id
         let second = Task { await gate.ask(durationSeconds: 50) }
         let firstChoice = await first.value
         XCTAssertEqual(firstChoice, .cancel)
-        while gate.request == nil || gate.request?.id == firstID { await Task.yield() }
+        await spin { gate.request != nil && gate.request?.id != firstID }
         XCTAssertEqual(gate.request?.durationSeconds, 50)
         gate.resolve(.pro)
         let secondChoice = await second.value

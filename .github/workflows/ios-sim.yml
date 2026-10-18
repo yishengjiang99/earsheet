@@ -59,7 +59,17 @@ jobs:
           echo "Using simulator: $name"
           echo "destination=platform=iOS Simulator,name=$name,OS=latest" >> "$GITHUB_OUTPUT"
 
+      - name: Allowlist covers every EarSheetTests class
+        run: |
+          set -euo pipefail
+          grep -rhoE 'class [A-Za-z0-9_]+[[:space:]]*:[[:space:]]*XCTestCase' Tests/EarSheetTests | awk '{print $2}' | tr -d ':' | sort -u > "$RUNNER_TEMP/test-classes.txt"
+          grep -oE 'only-testing:EarSheetTests/[A-Za-z0-9_]+' .github/workflows/ios-sim.yml | cut -d/ -f2 | sort -u > "$RUNNER_TEMP/allowlist.txt"
+          missing=$(comm -23 "$RUNNER_TEMP/test-classes.txt" "$RUNNER_TEMP/allowlist.txt")
+          if [ -n "$missing" ]; then echo "::error::test classes missing from the -only-testing allowlist: $missing"; exit 1; fi
+          echo "allowlist covers $(wc -l < "$RUNNER_TEMP/test-classes.txt") test classes"
+
       - name: xcodebuild test
+        timeout-minutes: 30
         env:
           # xcodebuild strips TEST_RUNNER_ and forwards to the simulator test process.
           TEST_RUNNER_OMR_MODELS_DIR: ${{ github.workspace }}/models
@@ -95,6 +105,11 @@ jobs:
             -only-testing:EarSheetTests/TelemetryPrivacyTests \
             -only-testing:EarSheetTests/DebugExportRemovalTests \
             -destination "${{ steps.sim.outputs.destination }}" \
+            -parallel-testing-enabled NO \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 60 \
+            -maximum-test-execution-time-allowance 120 \
             -resultBundlePath "$RUNNER_TEMP/EarSheet.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             | tee "$RUNNER_TEMP/xcodebuild.log"
@@ -143,7 +158,7 @@ jobs:
           retention-days: 14
 
       - name: Upload xcresult
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: EarSheet-xcresult
@@ -151,3 +166,4 @@ jobs:
             ${{ runner.temp }}/EarSheet.xcresult
             ${{ runner.temp }}/xcodebuild.log
           if-no-files-found: ignore
+          retention-days: 7
