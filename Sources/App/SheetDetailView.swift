@@ -227,7 +227,7 @@ struct SheetDetailView: View {
             if success {
                 report("Saved to Photos.")
             } else {
-                report("Could not save the photo: \(error?.localizedDescription ?? "unknown error")")
+                report(UserFacingError.message(for: error, context: .savePhoto))
             }
         }
     }
