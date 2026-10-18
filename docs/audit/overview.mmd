@@ -1,0 +1,29 @@
+flowchart TD
+  L(["F1 Launch"]) --> OB{"F1.2 onboarding seen?"}
+  OB -->|no| ONB["F1.2 Onboarding"] --> HOME
+  OB -->|yes| HOME["F2 Library"]
+  HOME -->|mic| PERM{"F3 mic permission"}
+  PERM -->|denied| DEN["F3.3 dead-end message"]
+  PERM -->|granted| LIVE["F4 Live listening"]
+  LIVE -->|interruption / 60 s| LIVE
+  LIVE -->|failure| FAIL["F5.2-5.3 silent / quiet / none"]
+  LIVE -->|Stop| WRITE["F5 Writing page"]
+  WRITE --> GATE{"P1 save limit: 3 free"}
+  GATE -->|under limit or Pro| TAKE["F6 Take screen"]
+  GATE -->|at limit| HELD["F5.5 Held take banner"]
+  HELD -->|Keep it| PW
+  HELD -->|Library back| LOST["F5.6 take discarded"]
+  HOME -->|import audio/MIDI/video| IMP["F9 Import"]
+  IMP -->|audio| TAKE
+  IMP -->|MIDI / video| GATE
+  TAKE --> EXP["F10 Export"]
+  EXP -->|PDF 30 s / MP3 / photo| SHARE["Share sheet"]
+  EXP -->|MIDI / MusicXML locked| PW["P2 Paywall"]
+  HOME -->|gear| SET["F12 Settings"]
+  SET -->|Go Pro| PW
+  SET -->|Restore| RES["P6 Restore"]
+  PW -->|CTA| BUY["P3-P5 Purchase / cancel / pending"]
+  PW -->|Restore| RES
+  BUY --> PRO["P7/P9 Pro on"]
+  RES --> PRO
+  PRO -.->|expiry while running: no refresh| STALE["P7.4 stays Pro until relaunch"]
