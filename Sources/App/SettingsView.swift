@@ -8,11 +8,20 @@ struct SettingsView: View {
 
     static func goProRoute(isPro: Bool) -> GoProRoute { isPro ? .manage : .paywall }
 
+    /// Second line of the Pro row: the plan and renewal/expiry for Pro users, the pitch for free users.
+    static func goProSubtitle(isPro: Bool, status: ProStatus?, locale: Locale = .current,
+                              timeZone: TimeZone = .current) -> String {
+        guard isPro else { return "Unlimited saves, MIDI, MusicXML & full PDF" }
+        let line = status?.statusLine(locale: locale, timeZone: timeZone) ?? "You have Pro"
+        return "\(line)\nTap to manage your subscription."
+    }
+
     @ObservedObject var store: ProStore
     @ObservedObject private var push = PushManager.shared
     @State private var shareUsage = Telemetry.shared.isEnabled
     @State private var pushBusy = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paywallTriggers) private var triggers
     @State private var showPaywall = false
     @State private var showManage = false
     @State private var restoring = false
@@ -33,13 +42,19 @@ struct SettingsView: View {
     @State private var measuringFloor = false
     @State private var floorProblem: NoiseFloorMeter.Outcome?
 
+    /// Settings "Go Pro" is a tap: it goes through the shared policy (never for Pro, never counted).
+    private var settingsPaywallAllowed: Bool {
+        let context = UpgradePromptContext(proStore: store, finishedTakes: 1)
+        return triggers?.decision(.settings, userInitiated: true, context: context).isShow ?? !store.isPro
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     Button(action: {
                         switch Self.goProRoute(isPro: store.isPro) {
-                        case .paywall: showPaywall = true
+                        case .paywall: showPaywall = settingsPaywallAllowed
                         case .manage: showManage = true
                         }
                     }) {
@@ -49,7 +64,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading) {
                                 Text(store.isPro ? "AI Music Radar Pro" : "Go Pro")
                                     .fontWeight(.semibold)
-                                Text(store.isPro ? "You have Pro. Tap to manage your subscription." : "Unlimited saves, MIDI, MusicXML & full PDF")
+                                Text(Self.goProSubtitle(isPro: store.isPro, status: store.proStatus))
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

@@ -133,6 +133,11 @@ struct PaywallView: View {
             Text("You're Pro")
                 .font(.system(.largeTitle, design: .serif))
                 .fontWeight(.bold)
+            if let line = store.proStatus?.statusLine() {
+                Text(line)
+                    .font(.headline)
+                    .foregroundStyle(Ink.teal)
+            }
             Text("Unlimited saves and MIDI, MusicXML & full PDF export are unlocked. Thank you for supporting AI Music Radar.")
                 .font(.body)
                 .foregroundStyle(.secondary)
