@@ -121,7 +121,7 @@ struct ExportView: View {
             shareItems = [url]
             showShare = true
         } catch {
-            notice = "Could not write the file: \(error.localizedDescription)"
+            notice = UserFacingError.message(for: error, context: .fileWrite)
         }
     }
 
@@ -148,7 +148,7 @@ struct ExportView: View {
                 let mp3 = try await AudioExporter.mp3Data(for: score)
                 shareFile(name: "\(baseName).mp3", data: mp3)
             } catch {
-                notice = "Could not render MP3: \(error.localizedDescription)"
+                notice = UserFacingError.message(for: error, context: .renderMP3)
             }
         }
     }

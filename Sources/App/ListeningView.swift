@@ -125,7 +125,7 @@ final class ListeningSession: ObservableObject {
             startTimer()
         } catch {
             teardownRecording()
-            phase = .failed("Could not start listening: \(error.localizedDescription)")
+            phase = .failed(UserFacingError.message(for: error, context: .listeningStart))
         }
     }
 
@@ -147,7 +147,7 @@ final class ListeningSession: ObservableObject {
     func handlePumpFailure(_ error: Error) {
         guard case .listening = phase else { return }
         teardownRecording()
-        phase = .failed("Transcription failed: \(error.localizedDescription)")
+        phase = .failed(UserFacingError.message(for: error, context: .transcription))
     }
 
     /// Runs on the pump queue (nonisolated): inference + decode, then hops
@@ -222,7 +222,7 @@ final class ListeningSession: ObservableObject {
                 notes = try finalizer(streamer, samples, dropQuiet, gateThresholdDB)
             } catch {
                 Task { @MainActor [weak self] in
-                    self?.phase = .failed("Could not write the page: \(error.localizedDescription)")
+                    self?.phase = .failed(UserFacingError.message(for: error, context: .writePage))
                 }
                 return
             }

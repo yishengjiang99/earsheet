@@ -254,7 +254,7 @@ final class TakeLibrary: ObservableObject {
                 playingTakeID = take.id
                 player.play()
             } catch {
-                notice = "Playback failed: \(error.localizedDescription)"
+                notice = UserFacingError.message(for: error, context: .playback)
             }
         }
     }
@@ -365,7 +365,7 @@ final class TakeLibrary: ObservableObject {
             let data = try JSONEncoder().encode(takes)
             try data.write(to: storeURL, options: .atomic)
         } catch {
-            postNotice("Could not save your takes: \(error.localizedDescription)")
+            postNotice(UserFacingError.message(for: error, context: .saveLibrary))
         }
     }
 }
