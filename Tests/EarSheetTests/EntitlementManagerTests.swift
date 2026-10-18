@@ -27,27 +27,26 @@ final class EntitlementManagerTests: XCTestCase {
     }
 
     func testExpiredSubscriptionBlocksAfterRefresh() async throws {
-        let session: SKTestSession
-        do {
-            session = try SKTestSession(contentsOf: PaywallPricingTests.storekitURL)
-        } catch {
-            throw XCTSkip("SKTestSession unavailable here: \(error)")
-        }
-        session.resetToDefaultState()
-        session.clearTransactions()
-        session.disableDialogs = true
+        UserDefaults.standard.removeObject(forKey: "pro.isPro")
+        defer { UserDefaults.standard.removeObject(forKey: "pro.isPro") }
+        let entitlements = FakeEntitlements()
+        let store = ProStore(entitlementSource: entitlements.source)
 
-        let store = ProStore()
-        await store.loadProducts(force: true)
-        XCTAssertNotNil(store.product(for: ProStore.monthlyID), "local StoreKit returned no products (\(store.productsError ?? "-"))")
-        // Product.purchase() never returns headless in CI (#86): buy through the test session instead.
-        try session.buyProduct(productIdentifier: ProStore.monthlyID)
+        entitlements.records = [EntitlementRecord(productID: ProStore.monthlyID,
+                                                  expirationDate: Date().addingTimeInterval(3600))]
         await store.refreshEntitlement()
         XCTAssertTrue(store.isPro)
 
-        try session.expireSubscription(productIdentifier: ProStore.monthlyID)
+        entitlements.records = [] // StoreKit drops the subscription once it lapses
         await store.refreshEntitlement()
         XCTAssertFalse(store.isPro, "an expired subscription must lock Pro on the next refresh")
         XCTAssertFalse(UserDefaults.standard.bool(forKey: "pro.isPro"), "the offline cache must follow")
     }
+}
+
+/// Mutable stand-in for `Transaction.currentEntitlements` (see issue #86: no headless StoreKit purchases).
+@MainActor
+final class FakeEntitlements {
+    var records: [EntitlementRecord] = []
+    var source: EntitlementSource { { [unowned self] in self.records } }
 }

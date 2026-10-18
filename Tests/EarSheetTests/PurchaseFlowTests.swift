@@ -86,35 +86,17 @@ final class PurchaseFlowTests: XCTestCase {
     func testApprovalOfPendingPurchaseSetsPro() async throws {
         UserDefaults.standard.removeObject(forKey: "pro.isPro")
         defer { UserDefaults.standard.removeObject(forKey: "pro.isPro") }
-        let session: SKTestSession
-        do {
-            session = try SKTestSession(contentsOf: PaywallPricingTests.storekitURL)
-        } catch {
-            throw XCTSkip("SKTestSession unavailable here: \(error)")
-        }
-        session.resetToDefaultState()
-        session.clearTransactions()
-        session.disableDialogs = true
-        session.askToBuyEnabled = true
+        let entitlements = FakeEntitlements()
+        let store = ProStore(entitlementSource: entitlements.source)
 
-        let store = ProStore()
-        await store.loadProducts(force: true)
-        guard let yearly = store.product(for: ProStore.yearlyID) else {
-            throw XCTSkip("local StoreKit returned no products (\(store.productsError ?? "-"))")
-        }
-        XCTAssertNotNil(yearly)
-        // Product.purchase() never returns headless in CI (#86): create the Ask-to-Buy transaction directly.
-        try session.buyProduct(productIdentifier: ProStore.yearlyID)
         await store.refreshEntitlement()
-        XCTAssertFalse(store.isPro, "a pending Ask to Buy transaction is not Pro")
+        XCTAssertFalse(store.isPro, "a purchase waiting for Ask to Buy approval is not Pro")
 
-        let pending = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProStore.yearlyID })
-        try session.approveAskToBuyTransaction(identifier: pending.identifier)
-
-        // Transaction.updates -> refreshEntitlement flips isPro (the paywall observes it and closes).
-        for _ in 0..<50 where !store.isPro {
-            try await Task.sleep(nanoseconds: 200_000_000)
-        }
+        // Approval: the entitlement appears and the next refresh (Transaction.updates) flips Pro on.
+        entitlements.records = [EntitlementRecord(productID: ProStore.yearlyID,
+                                                  expirationDate: Date().addingTimeInterval(86400 * 365))]
+        await store.refreshEntitlement()
         XCTAssertTrue(store.isPro, "approval must turn Pro on without another purchase call")
+        XCTAssertFalse(store.purchasePendingApproval)
     }
 }

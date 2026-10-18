@@ -51,27 +51,18 @@ final class RestoreFlowTests: XCTestCase {
     }
 
     func testRestoreResults() async throws {
-        let session: SKTestSession
-        do {
-            session = try SKTestSession(contentsOf: PaywallPricingTests.storekitURL)
-        } catch {
-            throw XCTSkip("SKTestSession unavailable here: \(error)")
-        }
-        session.resetToDefaultState()
-        session.clearTransactions()
-        session.disableDialogs = true
-
-        let store = ProStore(sync: {})
-        await store.loadProducts(force: true)
-        XCTAssertNotNil(store.product(for: ProStore.monthlyID), "local StoreKit returned no products (\(store.productsError ?? "-"))")
+        UserDefaults.standard.removeObject(forKey: "pro.isPro")
+        defer { UserDefaults.standard.removeObject(forKey: "pro.isPro") }
+        let entitlements = FakeEntitlements()
+        let store = ProStore(sync: {}, entitlementSource: entitlements.source)
         let none = await store.restore()
         XCTAssertEqual(none, .none, "a clean account has nothing to restore")
         XCTAssertFalse(store.isPro)
 
-        try session.buyProduct(productIdentifier: ProStore.monthlyID) // Product.purchase() hangs headless (#86)
-        await store.refreshEntitlement()
-        XCTAssertTrue(store.isPro)
+        entitlements.records = [EntitlementRecord(productID: ProStore.monthlyID,
+                                                  expirationDate: Date().addingTimeInterval(3600))]
         let active = await store.restore()
         XCTAssertEqual(active, .restored, "restore on an active Pro account reports success")
+        XCTAssertTrue(store.isPro)
     }
 }

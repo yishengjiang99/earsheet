@@ -20,6 +20,16 @@ import StoreKit
 /// queued for `POST /api/iap/verify` (ServerSync / VerifyQueue, retried until the
 /// server has it). StoreKit stays the source of truth for `isPro`; the server is
 /// the cross-device record.
+/// One verified current entitlement, decoupled from StoreKit types so tests can supply them.
+struct EntitlementRecord {
+    var productID: String
+    var expirationDate: Date?
+    var isIntroOffer = false
+    var report: (() -> Void)?
+}
+
+typealias EntitlementSource = @MainActor () async -> [EntitlementRecord]
+
 @MainActor
 final class ProStore: ObservableObject {
     static let monthlyID = "com.ragnus.pnge.pro.monthly"
@@ -55,10 +65,15 @@ final class ProStore: ObservableObject {
     private var expiryTask: Task<Void, Never>?
     private var cache = EntitlementCache()
     private let sync: () async throws -> Void
+    private let entitlementSource: EntitlementSource?
 
     /// `sync` is `AppStore.sync()` in production; tests inject a closure that throws.
-    init(sync: @escaping () async throws -> Void = { try await AppStore.sync() }) {
+    /// `entitlementSource` replaces `Transaction.currentEntitlements` in tests (StoreKit purchases cannot
+    /// be created headless on CI, issue #86); production passes nil.
+    init(sync: @escaping () async throws -> Void = { try await AppStore.sync() },
+         entitlementSource: EntitlementSource? = nil) {
         self.sync = sync
+        self.entitlementSource = entitlementSource
         isPro = cache.isPro
         updatesTask = Task { [weak self] in
             await self?.listenForTransactions()
@@ -193,15 +208,14 @@ final class ProStore: ObservableObject {
         var pro = false
         var earliestExpiry: Date?
         var current: [ProStatus] = []
-        for await result in Transaction.currentEntitlements {
-            guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
+        for record in await currentEntitlementRecords() {
             pro = true
-            if let expiry = transaction.expirationDate {
+            if let expiry = record.expirationDate {
                 earliestExpiry = earliestExpiry.map { min($0, expiry) } ?? expiry
             }
-            if let plan = ProStatus.plan(forProductID: transaction.productID) {
-                current.append(ProStatus(plan: plan, expiresAt: transaction.expirationDate,
-                                         isTrial: transaction.offerType == .introductory, willRenew: nil))
+            if let plan = ProStatus.plan(forProductID: record.productID) {
+                current.append(ProStatus(plan: plan, expiresAt: record.expirationDate,
+                                         isTrial: record.isIntroOffer, willRenew: nil))
             }
         }
         var status = pro ? ProStatus.best(current) : nil
@@ -262,12 +276,25 @@ final class ProStore: ObservableObject {
     /// Queues the JWS of every verified current entitlement for the server. Returns the count.
     private func reportCurrentEntitlements() async -> Int {
         var count = 0
-        for await result in Transaction.currentEntitlements {
-            guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
-            ServerSync.report(transaction.id, transaction.appAccountToken, result.jwsRepresentation)
+        for record in await currentEntitlementRecords() {
+            record.report?()
             count += 1
         }
         return count
+    }
+
+    /// Verified current entitlements for our products (the injected source in tests).
+    private func currentEntitlementRecords() async -> [EntitlementRecord] {
+        if let entitlementSource { return await entitlementSource() }
+        var records: [EntitlementRecord] = []
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checked(result), Self.productIDs.contains(transaction.productID) else { continue }
+            let jws = result.jwsRepresentation
+            records.append(EntitlementRecord(productID: transaction.productID, expirationDate: transaction.expirationDate,
+                                             isIntroOffer: transaction.offerType == .introductory,
+                                             report: { ServerSync.report(transaction.id, transaction.appAccountToken, jws) }))
+        }
+        return records
     }
 
     private func listenForTransactions() async {
