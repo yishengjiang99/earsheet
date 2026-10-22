@@ -9,6 +9,7 @@ discover and call. Three grepawk sites register tools:
 | FilmCraft (`grepawk.com/filmcraft/`) | `apps/filmcraft-web/web/webmcp.js` (+ `webmcp-commands.json`) | yishengjiang99/filmcraft |
 | FinalCap / FinalCut chat editor (`grepawk.com/`) | `public/webmcp.js` (+ the `window.finalcutApp` bridge in `src/App.jsx`) | yishengjiang99/finalcut |
 | AI Music Radar (`music.grepawk.com/`) | `tools/music-radar-site/static/webmcp.js` | yishengjiang99/earsheet |
+| AI Music Radar web demo (`grepawk.com/music-hear/`) | `web/webmcp.js` (+ `state.api` in `web/app.js`) | yishengjiang99/earsheet |
 
 ## API shape and feature detection
 
@@ -81,6 +82,28 @@ The site is a landing page. The tools cover what a visitor does there:
 `musicradar.app_info` (description, platforms, pricing, App Store link, demo URL), `musicradar.read_section(section)`,
 `musicradar.go_to_section(section)`, `musicradar.play_video(pause?)`, `musicradar.open_web_demo`.
 None of them is destructive.
+
+## AI Music Radar web demo (grepawk.com/music-hear) tools
+
+The demo transcribes audio to notes in the browser (Basic Pitch in a Web Worker). The tools call
+`window.__earsheet.api`, which holds the same handlers the page's buttons use. Nothing is sent to a server.
+The demo has no score scanning or transpose, so neither has a tool.
+
+| Tool | What it does |
+|---|---|
+| `musichear.get_results(maxNotes?)` | Detected notes (midi, name, onset/offset, velocity), engine state, view, tempo, and meter/key once analyzed. Read-only. |
+| `musichear.load_sample` | Loads the built-in sample (C major scale and triad) and transcribes it. |
+| `musichear.transcribe_url(url)` | Fetches a same-origin audio or video file and transcribes it. |
+| `musichear.retranscribe` | Runs the transcription again on the loaded audio. |
+| `musichear.start_recording` / `musichear.stop_recording` | Live microphone listening, the Record button. |
+| `musichear.play(source?)` / `musichear.stop` | Plays the detected notes (synth) or the original audio, and stops playback. |
+| `musichear.set_view(view)` | `roll` (piano roll) or `page` (sheet music). |
+| `musichear.set_tempo(bpm?)` | Tempo override for the sheet and MIDI; omit bpm to go back to the estimate. |
+| `musichear.analyze_sheet` | Tempo, meter and key for the current notes. |
+| `musichear.download_midi` | MIDI export. Asks the user first. |
+
+Loading the sample or a file, or starting a recording, replaces the current take. When that take has notes
+that weren't exported, the tool asks the user first, the same rule as the page's Re-record button.
 
 ## Testing
 
