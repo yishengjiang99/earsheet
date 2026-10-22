@@ -839,7 +839,11 @@ async function wire() {
     $(id).onchange = () => { if (!state.live && state.F.length) finalizeNotes(); };
   }
   window.addEventListener('resize', () => { if (!state.live && state.notes.length) { if (state.view === 'page') renderPage(); else drawRoll({}); } });
-  state.api = { setView, setTempo, sheetScore, currentSheet, estimatedTempo, dropQuietNotes, startLive, stopLive };
+  state.api = { setView, setTempo, sheetScore, currentSheet, estimatedTempo, dropQuietNotes, startLive, stopLive,
+    // Also used by webmcp.js (docs/webmcp.md): the same handlers the buttons call.
+    loadAudio, runFile, playNotes, playOriginal, stop, downloadMidi,
+    loadSample: async () => { await loadAudio(synthSample(), 'Sample (C major scale + triad)'); await runFile(); },
+    midiName, keyName };
   const params = new URLSearchParams(location.search);
   const pref = params.get('backend') || 'auto';
   $('backend-select').value = pref;
