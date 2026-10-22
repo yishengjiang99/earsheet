@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thank you | AI Music Radar</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://music.grepawk.com/thanks">
+<link rel="icon" href="favicon.ico" sizes="any">
+<style>
+body{background:#0e1216;color:#f5f1e6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6;margin:0}
+main{max-width:640px;margin:0 auto;padding:80px 24px;text-align:center}
+h1{font-family:Georgia,serif;font-size:40px;margin-bottom:12px}
+p{color:#a3adb6;font-size:18px;margin:0 0 16px}
+a.btn{display:inline-block;margin-top:18px;padding:14px 28px;border-radius:999px;background:#2dd4bf;color:#06231f;font-weight:700;text-decoration:none}
+a{color:#2dd4bf}
+</style>
+</head>
+<body>
+<main>
+  <h1>You're in. Thank you!</h1>
+  <p id="msg">Your AI Music Radar purchase is confirmed. Stripe has emailed your receipt.</p>
+  <p>Your purchase is tied to the email you used at checkout. We'll email you there to unlock Pro the day the iPhone app launches on the App Store.</p>
+  <p>Questions? <a href="support">Support</a> · <a href="privacy">Privacy</a></p>
+  <a class="btn" href="https://grepawk.com/music-hear/" data-track="web_demo_click">Open the web demo</a>
+</main>
+<script>
+(function(){var p=new URLSearchParams(location.search).get('plan');var m=document.getElementById('msg');
+if(p==='pro_monthly'||p==='pro_yearly')m.textContent='Your 7-day free trial of AI Music Radar Pro has started. You won\u2019t be charged until it ends. To cancel before then, contact us through the Support page.';})();
+</script>
+<script src="ads-config.js"></script>
+<script src="ads.js" defer></script>
+<script src="site.js" defer></script>
+</body>
+</html>
