@@ -7,7 +7,7 @@ Any figure without a cited source is a **proposal**, not data.
 ## 1. Where it lives
 - Repo: `yishengjiang99/earsheet`. The site is `tools/music-radar-site/` plus `docs/explainer/index.html` and `docs/legal/music-radar/`. It deploys through the "Deploy music.grepawk.com" workflow to `/var/www/music-radar` on 64.23.239.208.
 - The nginx vhost source is `tools/music-radar-site/nginx/music.grepawk.com.conf`, and the repo keeps a snapshot of the live config. I did not SSH to prod.
-- Web demo: grepawk.com/music-hear, branded "EarSheet". The iOS app is `EarSheet.xcodeproj`, and `Products.storekit` holds its StoreKit products.
+- Brand: **AI Music Radar** (decided). Web demo: grepawk.com/music-hear, which is still branded "EarSheet" (see the rename item in §6). The iOS app is `EarSheet.xcodeproj`, and `Products.storekit` holds its StoreKit products.
 
 ## 2. Product (from the HTML, the code and the parent's walkthrough)
 AI Music Radar is an iPhone/iPad app that is not released yet ("coming soon"). It listens to music live and writes it out as sheet music, using Basic Pitch on the device.
@@ -19,7 +19,7 @@ Consumer flow today: landing page → (no app to download) → web demo on anoth
 ![demo](04-web-demo-initial.png) ![running](05-demo-sample-running.png) ![roll](06-demo-piano-roll.png) ![sheet](07-demo-sheet-music-page.png)
 
 Walkthrough issues:
-1. Two names: "AI Music Radar" on the landing page and "EarSheet" in the demo.
+1. Two names: "AI Music Radar" on the landing page and "EarSheet" in the demo. **Decided (2026-10-22): the brand is AI Music Radar.** "EarSheet" stays only as an internal repo/code name.
 2. No app to download yet, and the demo lives on a different domain (grepawk.com/music-hear).
 3. The hero video may not play.
 4. The Free tier says "unlimited" next to a 30 s cap, which reads as a contradiction.
@@ -35,7 +35,7 @@ Source: `yishengjiang99/finalcut`, files `src/server/stripe.js`, `src/server/mid
 - **Conversion tracking:** there is no X pixel (`twq`), no Reddit pixel (`rdt`) and no Conversions API anywhere in the code. The only telemetry is first-party (`telemetry.js`; music's `site.js` posts to `/api/telemetry/batch`).
 
 Reuse plan (server work happens in finalcut, and music's client stays untouched for now):
-1. Add Stripe prices for Music Pro monthly, Music Pro yearly and Music Lifetime, and add them to `allowedStripePriceIds`.
+1. Add Stripe products named **AI Music Radar Pro (Monthly)**, **AI Music Radar Pro (Yearly)** and **AI Music Radar Lifetime** (to match the StoreKit names "AI Music Radar Pro" / "Lifetime Pro" in `Products.storekit`). Checkout and receipts show these names. Use "AI Music Radar" as the statement descriptor and on the Checkout page too. Add the prices and add them to `allowedStripePriceIds`.
 2. Lifetime needs `mode: 'payment'`. The current code hardcodes `subscription`, so choose the mode from the price.
 3. Set `metadata.product = 'music'` on the session. Store per-product entitlements (`entitlements(user, product, source, active)`) instead of the single global `has_subscription`. Otherwise a paid finalcut user unlocks music and the reverse.
 4. Make the `success_url` and `cancel_url` follow a request `return_to` that is on an allowlist (music.grepawk.com).
@@ -80,7 +80,13 @@ Hobby and returning musicians (piano and guitar first), music students, and teac
 ## 6. Launch-readiness checklist (top 3 blockers first)
 - [ ] **B1. Nothing to buy:** the app isn't released and the page has no checkout. Ship the App Store listing, or a web Stripe checkout for web access.
 - [ ] **B2. No conversion tracking:** add X and Reddit CAPI from the finalcut webhook, plus click-id capture and the per-product entitlement and Lifetime `payment` mode.
-- [ ] **B3. Broken funnel and brand:** pick one name (AI Music Radar or EarSheet), move the demo to music.grepawk.com, and fix the hero video, the "unlimited"/30 s copy, the F1 jargon, the sheet full of rests, and the dead "Page" tab.
+- [ ] **B3. Broken funnel and brand:** brand decided as AI Music Radar (see rename item below), move the demo to music.grepawk.com, and fix the hero video, the "unlimited"/30 s copy, the F1 jargon, the sheet full of rests, and the dead "Page" tab.
+- [ ] **Rename the EarSheet branding users see to AI Music Radar** (track only here, do not edit app or client code in this PR; another worker is in the client):
+  - `web/index.html`: `<title>EarSheet web demo…` (l.6), `<h1>EarSheet` (l.13), lede "the EarSheet iOS app" (l.14), the help text "EarSheet's quantizer" (l.141), and the footer "the EarSheet repo" (l.143). This is the grepawk.com/music-hear demo.
+  - `web/app.js` l.783: the exported MIDI header name `'EarSheet web transcription'`, which users see in their DAW.
+  - `tools/web-demo/deploy-grepawk.sh`: the demo deploys to `/music-hear/`. Consider serving it at music.grepawk.com/demo with a redirect (the comment there also says EarSheet).
+  - Stripe Dashboard: create the products under AI Music Radar names (no EarSheet products exist yet, and finalcut's `src/server` has no EarSheet strings).
+  - Not user-facing, leave alone: the `EarSheet.xcodeproj` name (its display name is already "AI Music Radar"), and the `Application Support/EarSheet` folders in `Sources/App/Telemetry.swift` and `VerifyQueue.swift`.
 - [ ] Privacy policy: disclose the ad pixels / CAPI (it currently says no third parties).
 - [ ] X and Reddit ad accounts with billing; verify the domain.
 - [ ] Off switch `ADS_CAPI_ENABLED` documented.
