@@ -4,5 +4,7 @@ Disallow: /api/
 Disallow: /admin
 Disallow: /music-radar/api/
 Disallow: /music-radar/admin
+Disallow: /thanks
+Disallow: /music-radar/thanks
 
 Sitemap: https://music.grepawk.com/sitemap.xml

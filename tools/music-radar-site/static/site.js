@@ -25,7 +25,18 @@
       var body = JSON.stringify({ events: [{ name: name, ts: Date.now(), installId: id, sessionId: id, appVersion: 'web', properties: p }] });
       try { fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true, credentials: 'omit' }).catch(function () {}); } catch (e) {}
     };
-    send('web_page_view', { referrer_host: refHost.slice(0, 100) });
+    var qs = new URLSearchParams(location.search);
+    var pv = { referrer_host: refHost.slice(0, 100) };
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'].forEach(function (k) { var v = qs.get(k); if (v) pv[k] = v.slice(0, 80); });
+    send('web_page_view', pv);
+    if (/\/thanks(\.html)?$/.test(location.pathname) && qs.get('session_id')) send('web_checkout_success', { plan: (qs.get('plan') || '').slice(0, 20) });
+    if (qs.get('checkout') === 'cancel') send('web_checkout_cancel', {});
+    if (qs.get('waitlist') === 'ok') send('web_waitlist_joined', {});
+    document.addEventListener('submit', function (ev) {
+      var f = ev.target;
+      if (f && f.getAttribute && f.getAttribute('data-checkout')) send('web_checkout_click', { plan: f.getAttribute('data-checkout').slice(0, 20) });
+      else if (f && f.hasAttribute && f.hasAttribute('data-waitlist')) send('web_waitlist_submit', {});
+    }, true);
     document.addEventListener('click', function (ev) {
       var a = ev.target && ev.target.closest ? ev.target.closest('a[data-track]') : null;
       if (!a) return;
