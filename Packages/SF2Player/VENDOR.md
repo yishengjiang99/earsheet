@@ -2,7 +2,7 @@
 
 - SoundFont 2 parser + synth (SF2Engine): the shared package
   https://github.com/yishengjiang99/sf2player-swift, pinned by exact revision in `Package.swift`
-  (5e07519752f3c1795ceb90cd57cc52b2b0bfdca8, 2026-10-22: SoundFont 2.01, .gbk = .spec). omr-sheet-cam pins the same module.
+  (24e105f3a876c6dd7a172e68f13f333a9969263d, 2026-10-22: SoundFont 2.01, .gbk = .spec). omr-sheet-cam pins the same module.
   Do not copy engine sources here; bump the revision instead.
 - Sequencing / real-time player glue (SMFReader, SF2SequenceBuilder, SF2RealtimeCore, SF2MIDIPlayer,
   level meter): vendored from https://github.com/yishengjiang99/omr-sheet-cam `Packages/SF2Player` at

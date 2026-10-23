@@ -14,7 +14,7 @@ let package = Package(
     ],
     dependencies: [
         // Shared SF2 rendering engine (same module in omr-sheet-cam and earsheet), pinned revision.
-        .package(url: "https://github.com/yishengjiang99/sf2player-swift.git", revision: "5e07519752f3c1795ceb90cd57cc52b2b0bfdca8"),
+        .package(url: "https://github.com/yishengjiang99/sf2player-swift.git", revision: "24e105f3a876c6dd7a172e68f13f333a9969263d"),
     ],
     targets: [
         // Lock-free acquire/release loads and stores for the render-thread command ring.
