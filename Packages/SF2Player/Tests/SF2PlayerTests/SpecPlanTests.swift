@@ -40,10 +40,11 @@ final class SpecPlanTests: XCTestCase {
         XCTAssertEqual(cc.velocity, 64); XCTAssertEqual(cc.channel, 0); XCTAssertEqual(cc.frame, 22050)
         let bend = try XCTUnwrap(plan.events.first { $0.kind == .pitchBend })
         XCTAssertEqual(bend.velocity, 12288); XCTAssertEqual(bend.frame, 22050)
-        // gbk plan: no controller / bend events, no channel presets (bit-exact gbk export).
+        // `.gbk` is now an alias of `.spec` (sf2player-swift sf2-201-gbk-sync), so the default plan is this same spec plan.
         let gbk = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: 44100)
-        XCTAssertEqual(gbk.fidelity, .gbk)
-        XCTAssertFalse(gbk.events.contains { $0.kind == .controlChange || $0.kind == .pitchBend || $0.channel != nil && $0.kind == .setPreset })
+        XCTAssertEqual(gbk.fidelity, .spec)
+        XCTAssertEqual(gbk.events.count, plan.events.count)
+        XCTAssertTrue(gbk.events.contains { $0.kind == .controlChange } && gbk.events.contains { $0.kind == .pitchBend })
     }
 
     func testSpecRenderAppliesCC7AndDrumsAndRealtimeMatchesOffline() throws {
@@ -55,7 +56,8 @@ final class SpecPlanTests: XCTestCase {
         XCTAssertTrue(offline.left.allSatisfy(\.isFinite))
         XCTAssertGreaterThan(offline.left.map { abs($0) }.max() ?? 0, 0.01)
         let gbkPlan = try SF2SequenceBuilder.plan(song: song, soundFont: sf, sampleRate: 44100)
-        XCTAssertNotEqual(SF2OfflineRenderer.render(gbkPlan).left[30000 ..< 31000], offline.left[30000 ..< 31000])
+        // `.gbk` aliases `.spec`: the default plan renders identically (formerly asserted a difference).
+        XCTAssertEqual(SF2OfflineRenderer.render(gbkPlan).left[30000 ..< 31000], offline.left[30000 ..< 31000])
         // Real-time core with the same plan is bit-identical to the offline render.
         let core = SF2RealtimeCore(sampleRate: 44100)
         core.setSequence(SF2CompiledSequence(plan: plan))
