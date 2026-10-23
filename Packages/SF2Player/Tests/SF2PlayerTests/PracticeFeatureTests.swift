@@ -79,9 +79,11 @@ final class PracticeFeatureTests: XCTestCase {
         core.play()
         _ = render(core, 256)
         core.seek(toSeconds: 10000.0 / 44100) // C4 held (1000..20000) and E4 #3 (9320..10320)
-        let out = render(core, 2048)
+        // Count right after the seek: E4 #3's noteOff (frame 10320) is 320 frames later, and SoundFont 2.01
+        // release timing (.gbk is now an alias of .spec) ends that voice within the old 2048-frame window.
+        let out = render(core, 256)
         XCTAssertEqual(core.engine.voiceCount, 2, "held C4 + E4 re-sounded after the seek")
-        XCTAssertGreaterThan(energy(out[0 ..< 2048]), 1e-3)
+        XCTAssertGreaterThan(energy(out[0 ..< 256]), 1e-3)
         core.seek(toSeconds: 25000.0 / 44100) // past every noteOff of C4; E4 #5 ended at 23550
         _ = render(core, 64)
         XCTAssertEqual(core.engine.voiceCount, 0)
