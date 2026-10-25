@@ -113,6 +113,13 @@ jobs:
         if: steps.secret.outputs.ok == 'true'
         env:
           MUSIC_RADAR_DEPLOY_HOST: ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}
+          # Ad pixels: repo Settings -> Secrets and variables -> Actions -> Variables. Off unless ADS_TRACKING_ENABLED=1.
+          ADS_TRACKING_ENABLED: ${{ vars.ADS_TRACKING_ENABLED }}
+          MUSIC_X_PIXEL_ID: ${{ vars.MUSIC_X_PIXEL_ID }}
+          MUSIC_X_EVENT_ID_PURCHASE: ${{ vars.MUSIC_X_EVENT_ID_PURCHASE }}
+          MUSIC_X_EVENT_ID_START_TRIAL: ${{ vars.MUSIC_X_EVENT_ID_START_TRIAL }}
+          MUSIC_X_EVENT_ID_LEAD: ${{ vars.MUSIC_X_EVENT_ID_LEAD }}
+          MUSIC_REDDIT_PIXEL_ID: ${{ vars.MUSIC_REDDIT_PIXEL_ID }}
         run: bash tools/music-radar-site/deploy-grepawk.sh
 
       - name: Install nginx vhost (guarded, auto-rollback)
@@ -132,7 +139,7 @@ jobs:
           if diff deploy-gate/api-before.txt deploy-gate/api-after.txt; then echo "API routes: status + headers identical"; else echo "FAIL: API responses changed" >&2; exit 1; fi
           fails=0
           chk() { local got; got="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$SITE$1")"; if [[ "$got" == "$2" ]]; then echo "ok   $1 -> $got"; else echo "FAIL $1 -> $got (want $2)"; fails=$((fails+1)); fi; }
-          for p in / /privacy /terms /support /robots.txt /sitemap.xml /site.js /og-1200x630.jpg; do chk "$p" 200; done
+          for p in / /privacy /terms /support /thanks /robots.txt /sitemap.xml /site.js /ads.js /ads-config.js /og-1200x630.jpg; do chk "$p" 200; done
           chk /this-page-does-not-exist 404
           for p in "" privacy support terms; do
             got="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://grepawk.com/music-radar/$p")"; [[ "$got" == 200 ]] && echo "ok   grepawk.com/music-radar/$p" || { echo "FAIL grepawk.com/music-radar/$p -> $got"; fails=$((fails+1)); }
