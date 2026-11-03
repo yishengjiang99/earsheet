@@ -6,6 +6,7 @@ HOW IT WORKS
 • The app listens through the microphone (or reads an audio file you import) and analyzes the sound note by note — pitch, timing, and duration.
 • A music-transcription neural network runs that analysis entirely on your iPhone. There is no server step, and nothing is sent to any AI service.
 • The result is real notation: an engraved score and piano roll you can play back, take into your notation app or DAW, and export as MIDI, MusicXML, or PDF.
+• The whole app — interface, score engraving, and playback engine — is original work, written from scratch in native Swift by an independent developer. No templates, no trackers.
 
 PRIVATE BY DESIGN
 • Transcription runs entirely on your device. Your recordings are never uploaded, to us or to anyone else.
