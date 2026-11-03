@@ -133,7 +133,7 @@ final class PaywallPricingTests: XCTestCase {
         let groups = try XCTUnwrap(json["subscriptionGroups"] as? [[String: Any]])
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups[0]["id"] as? String, "22437376")
-        XCTAssertEqual(groups[0]["name"] as? String, "AI Music Radar Pro")
+        XCTAssertEqual(groups[0]["name"] as? String, "EarSheet Pro")
         let subs = try XCTUnwrap(groups[0]["subscriptions"] as? [[String: Any]])
         let byID = Dictionary(uniqueKeysWithValues: subs.map { ($0["productID"] as? String ?? "", $0) })
         let expected: [(String, String, String, Int)] = [

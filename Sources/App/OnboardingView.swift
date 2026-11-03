@@ -2,7 +2,7 @@
 import SwiftUI
 
 enum OnboardingCopy {
-    static let hearText = "Point your phone at any music — a piano, a street performer, your own playing. AI Music Radar listens and finds every note. Your recordings never leave your phone."
+    static let hearText = "Point your phone at any music — a piano, a street performer, your own playing. EarSheet listens and finds every note. Your recordings never leave your phone."
 }
 
 /// First-launch onboarding: a 2-page swipe carousel explaining what the app

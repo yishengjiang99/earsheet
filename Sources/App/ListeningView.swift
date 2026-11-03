@@ -439,7 +439,7 @@ struct ListeningView: View {
         } message: {
             Text("Nothing will be saved.")
         }
-        .alert("AI Music Radar", isPresented: Binding(
+        .alert("EarSheet", isPresented: Binding(
             get: { session.notice != nil },
             set: { if !$0 { session.clearNotice() } }
         )) {
@@ -563,7 +563,7 @@ struct ListeningView: View {
             Image(systemName: "mic.slash")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("AI Music Radar needs the microphone to listen. Allow microphone access in Settings, then come back and try again.")
+            Text("EarSheet needs the microphone to listen. Allow microphone access in Settings, then come back and try again.")
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button("Open Settings") {

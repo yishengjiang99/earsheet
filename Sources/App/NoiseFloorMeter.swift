@@ -42,7 +42,7 @@ struct NoiseFloorMeter {
 
     /// Digital silence reads -90 (the estimator's lower clamp); no real microphone is that quiet.
     static let silenceFloorDB = -89.5
-    static let deniedMessage = "Microphone access is off for AI Music Radar. Turn it on in iOS Settings to measure the room."
+    static let deniedMessage = "Microphone access is off for EarSheet. Turn it on in iOS Settings to measure the room."
     static let couldNotStartMessage = "Couldn't start the microphone. Close other audio apps and try again."
     static let tooQuietMessage = "The microphone only picked up silence, so the noise floor wasn't saved. Make sure the microphone isn't covered and try again."
 

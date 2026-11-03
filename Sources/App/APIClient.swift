@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import Foundation
 
-/// The one HTTP client for the AI Music Radar backend (`server/` in this repo,
+/// The one HTTP client for the EarSheet backend (`server/` in this repo,
 /// live at https://grepawk.com/music-radar). No other code in the app calls
 /// URLSession for the API.
 ///

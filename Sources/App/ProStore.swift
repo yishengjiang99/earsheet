@@ -2,9 +2,10 @@
 import Foundation
 import StoreKit
 
-/// StoreKit 2 manager for AI Music Radar Pro.
+/// StoreKit 2 manager for EarSheet Pro.
 ///
-/// Products (created in App Store Connect 2026-10-03, group "AI Music Radar Pro"):
+/// Products (created in App Store Connect 2026-10-03, group "AI Music Radar Pro"
+/// — the ASC group name predates the 2026-11-02 EarSheet rename and is unchanged):
 /// - com.ragnus.pnge.pro.monthly  — $4.99/mo (USA), 1-week free trial, level 2
 /// - com.ragnus.pnge.pro.yearly   — $29.99/yr (USA), 1-week free trial, level 1
 /// - com.ragnus.pnge.lifetime     — $49.99 once (USA), non-consumable
@@ -357,7 +358,7 @@ enum RestoreResult: Equatable {
     case failed(String)
 
     static let noneMessage = "No Pro purchase found on this Apple ID."
-    static let restoredMessage = "Pro is active on this Apple ID. Thanks for supporting AI Music Radar!"
+    static let restoredMessage = "Pro is active on this Apple ID. Thanks for supporting EarSheet!"
 
     /// Text for the result alert (shared by Settings and the paywall); nil when nothing should be shown.
     var message: String? {

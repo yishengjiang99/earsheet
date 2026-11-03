@@ -72,7 +72,7 @@ struct ExportView: View {
                     Text("Pro formats")
                 } footer: {
                     if !proStore.isPro {
-                        Text("MIDI and MusicXML export require AI Music Radar Pro.")
+                        Text("MIDI and MusicXML export require EarSheet Pro.")
                     }
                 }
             }
@@ -109,7 +109,7 @@ struct ExportView: View {
             .sheet(isPresented: $showShare) {
                 ShareSheet(items: shareItems)
             }
-            .alert("AI Music Radar", isPresented: Binding(
+            .alert("EarSheet", isPresented: Binding(
                 get: { notice != nil },
                 set: { if !$0 { notice = nil } }
             )) {

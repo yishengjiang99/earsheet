@@ -103,7 +103,7 @@ struct PaywallView: View {
                 // Closing after a purchase is a conversion, not a dismissal.
                 if !store.isPro { Telemetry.shared.track(.paywallDismiss, triggerProperties) }
             }
-            .alert("AI Music Radar", isPresented: Binding(
+            .alert("EarSheet", isPresented: Binding(
                 get: { alertMessage != nil },
                 set: { if !$0 { store.purchaseError = nil; restoreNotice = nil } }
             )) {
@@ -138,7 +138,7 @@ struct PaywallView: View {
                     .font(.headline)
                     .foregroundStyle(Ink.teal)
             }
-            Text("Unlimited saves and MIDI, MusicXML & full PDF export are unlocked. Thank you for supporting AI Music Radar.")
+            Text("Unlimited saves and MIDI, MusicXML & full PDF export are unlocked. Thank you for supporting EarSheet.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -156,7 +156,7 @@ struct PaywallView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("AI Music Radar Pro")
+            Text("EarSheet Pro")
                 .font(.system(.largeTitle, design: .serif))
                 .fontWeight(.bold)
             Text("Every note, in every format.")

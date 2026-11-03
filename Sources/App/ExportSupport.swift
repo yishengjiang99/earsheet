@@ -4,7 +4,7 @@ import Foundation
 /// File names for exported files. Keeps letters, marks and digits from any script, so a title
 /// like "夜曲" survives; falls back to the app name when nothing usable is left.
 enum ExportFileName {
-    static let fallback = "AI Music Radar"
+    static let fallback = "EarSheet"
     static let maxLength = 80
 
     static func base(for title: String) -> String {

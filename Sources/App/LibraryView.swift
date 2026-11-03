@@ -228,7 +228,7 @@ struct LibraryView: View {
             Text("Free keeps \(ProStore.freeSaveLimit) pieces. Leaving now discards this one.")
         }
         .overlay { importOverlay }
-        .alert("AI Music Radar", isPresented: Binding(
+        .alert("EarSheet", isPresented: Binding(
             get: { library.notice != nil },
             set: { if !$0 { library.clearNotice() } }
         )) {

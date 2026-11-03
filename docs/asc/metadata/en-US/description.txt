@@ -1,22 +1,25 @@
-Play it, see it. AI Music Radar listens as you play, sing, or hum and turns it into sheet music, right on your iPhone.
+Play it, and watch it become sheet music. EarSheet listens as you play, sing, or hum — and writes the score live, right on your iPhone.
 
-Tap the mic and watch the notes appear on a piano roll while you play. When you stop, AI Music Radar writes the engraved score from your whole take, with tempo, time signature, and key detection. Press play to hear it back with every note lighting up as it sounds, and switch between the page and the piano roll to check pitches and rhythm. Import an audio file or grab the sound straight from a video in your Photos. Then take it further in MuseScore, Dorico, Sibelius, Finale, Logic, GarageBand, or any DAW.
+Tap the mic and notes appear while you play: an engraved staff page with tempo, time signature, and key detection. Press play to hear it back with every note lighting up as it sounds, or flip to the piano roll to check pitches and rhythm. Import an audio file, or grab the sound straight from a video in your Photos. Then take it further in MuseScore, Dorico, Sibelius, Finale, Logic, GarageBand, or any DAW.
+
+HOW IT WORKS
+• The app listens through the microphone (or reads an audio file you import) and analyzes the sound note by note — pitch, timing, and duration.
+• A music-transcription neural network runs that analysis entirely on your iPhone. There is no server step, and nothing is sent to any AI service.
+• The result is real notation: an engraved score and piano roll you can play back, take into your notation app or DAW, and export as MIDI, MusicXML, or PDF.
 
 PRIVATE BY DESIGN
-• Transcription runs entirely on your device with an on-device neural network. Your recordings are never uploaded.
+• Transcription runs entirely on your device. Your recordings are never uploaded, to us or to anyone else.
 • No account, no sign-in, no ads, no tracking.
 • Works offline: on a plane, in a practice room, in a classroom with no Wi-Fi.
 
 FREE INCLUDES
-• Transcription from the microphone: a live piano roll while you play, the engraved score when you stop
-• Import audio or video (first 30 seconds)
+• Real-time transcription from the microphone
 • Engraved score and piano roll with note-by-note playback
 • Save up to 3 pieces
 • MP3 and photo export, plus PDF of the first 30 seconds
 
-AI MUSIC RADAR PRO
+EARSHEET PRO
 • Unlimited saved pieces
-• Import audio or video up to 60 seconds
 • MIDI and MusicXML export
 • Full-length PDF export
 • Available as a monthly or yearly subscription (7-day free trial) or a one-time lifetime purchase
@@ -34,12 +37,5 @@ Try it in your browser first: grepawk.com/music-hear
 
 Questions or feedback: yisheng.jiang@gmail.com
 
-SUBSCRIPTIONS AND PURCHASES
-• Pro Monthly: $4.99 per month, auto-renewable subscription
-• Pro Yearly: $29.99 per year, auto-renewable subscription
-• Lifetime Pro: $49.99 one-time purchase, not a subscription
-• 7-day free trial on subscriptions for eligible new subscribers
-Prices are in USD and may vary by country. Payment is charged to your Apple ID at confirmation of purchase. Subscriptions automatically renew unless cancelled at least 24 hours before the end of the current period. Manage or cancel anytime in your App Store Account Settings.
-
-Terms of Use (EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+Terms of Use: https://grepawk.com/music-radar/terms
 Privacy Policy: https://grepawk.com/music-radar/privacy

@@ -139,7 +139,7 @@ struct SheetDetailView: View {
                 .presentationDetents([.medium])
             }
         }
-        .alert("AI Music Radar", isPresented: Binding(
+        .alert("EarSheet", isPresented: Binding(
             get: { notice != nil },
             set: { if !$0 { notice = nil } }
         )) {

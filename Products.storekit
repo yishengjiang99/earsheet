@@ -32,11 +32,11 @@
       "localizations" : [
         {
           "description" : "",
-          "displayName" : "AI Music Radar Pro",
+          "displayName" : "EarSheet Pro",
           "locale" : "en_US"
         }
       ],
-      "name" : "AI Music Radar Pro",
+      "name" : "EarSheet Pro",
       "subscriptions" : [
         {
           "adHocOffers" : [],

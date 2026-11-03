@@ -35,7 +35,7 @@ enum UserFacingError {
         case .renderMP3:
             return "Couldn't render the MP3. Please try again."
         case .savePhoto:
-            return "Couldn't save the photo. Check that AI Music Radar can add photos in Settings, then try again."
+            return "Couldn't save the photo. Check that EarSheet can add photos in Settings, then try again."
         case .saveLibrary:
             return "Couldn't save your takes. Check that your device has free storage, then try again."
         }

@@ -62,7 +62,7 @@ struct SettingsView: View {
                             Image(systemName: "crown.fill")
                                 .foregroundStyle(Ink.teal)
                             VStack(alignment: .leading) {
-                                Text(store.isPro ? "AI Music Radar Pro" : "Go Pro")
+                                Text(store.isPro ? "EarSheet Pro" : "Go Pro")
                                     .fontWeight(.semibold)
                                 Text(Self.goProSubtitle(isPro: store.isPro, status: store.proStatus))
                                     .font(.footnote)
@@ -112,7 +112,7 @@ struct SettingsView: View {
                     Text("Privacy")
                 } footer: {
                     if push.status == .denied {
-                        Text("Notifications are off for AI Music Radar in iOS Settings.")
+                        Text("Notifications are off for EarSheet in iOS Settings.")
                     } else {
                         Text("Usage data is anonymous: feature events only, never audio, notes or titles.")
                     }
