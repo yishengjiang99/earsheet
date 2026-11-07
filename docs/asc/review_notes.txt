@@ -1,34 +1,22 @@
-Added subscription terms and a functional Terms of Use (EULA) and Privacy Policy link to the App Store description, per 3.1.2.
+Hello — thank you for reviewing EarSheet: Music to Sheet Music.
 
-No account or login is needed; all features work on-device. Audio is transcribed on the phone and is never uploaded.
+WHAT THE APP DOES
+EarSheet is an automatic music transcription app. It listens to music through the iPhone microphone (or analyzes an audio file the user imports) and turns what it hears into written music: an engraved staff score and piano roll, exportable as MIDI, MusicXML, and PDF. No account or sign-in is needed, and none is requested.
 
-QUICK TOUR WITHOUT A MICROPHONE (works on any device or simulator)
-1. Launch the app and finish or skip onboarding to reach the Library ("Sheets").
-2. Under the "Samples" heading tap a built-in piece (for example "C Major Scale"). It opens on the "Piano roll" view. Tap Play (center button) to hear it, or switch to the "Page" tab to see the engraved score.
-3. Tap the Export icon (square with arrow, bottom bar). PDF (first 30 seconds), MP3 and Photo work on the free tier. MIDI and MusicXML show a lock and open the paywall.
-4. You can also import audio: tap the import icon (top right of the Library) > "Choose Audio or MIDI File" and pick any audio or MIDI file, or "Choose Video from Photos".
+HOW TO TEST IT
+1. Open the app and tap the microphone button on the main screen.
+2. Play a single instrument (piano or guitar work best), sing, or hum a melody.
+3. Notes appear on the staff in real time as the sound is analyzed.
+4. Tap Play to hear the transcription back with note-by-note highlighting.
+5. Tap Save to keep the piece; the Share menu offers MIDI, MusicXML, and PDF export. The free tier saves up to 3 pieces; the Pro paywall appears when saving a 4th piece or choosing a Pro export, and adds unlimited pieces and full exports.
 
-MICROPHONE PATH
-Tap the large microphone button at the bottom of the Library. iOS asks for microphone access (used only to listen while recording; nothing is uploaded): tap Allow. Play or sing music close to the phone (a speaker playing a piano recording works). Notes appear live as a piano roll while recording, with a 60 second maximum. Tap the Stop button; the engraved page is written from the whole take after you stop. If the recording is silent or too quiet the app shows "Too quiet to transcribe" (or "No notes found"); try again closer to the music, a few seconds of clear playing is enough. If microphone access was denied, the app shows how to enable it in Settings.
+HOW IT WORKS — ALL PROCESSING IS ON THE DEVICE
+Transcription is performed by a neural network that runs locally on the iPhone (Core ML). The model is adapted from Spotify's open-source "Basic Pitch" research model, used under its license and credited in the app and its open-source notices; the app, its notation rendering, and its playback engine are original native Swift code. The app contains NO integration with ChatGPT, OpenAI, or any other hosted AI service, and no audio or user content is transmitted anywhere for transcription — there is no transcription server. You can verify this by testing in Airplane Mode: transcription works fully offline.
 
-HOW TO REACH THE PAYWALL (AI Music Radar Pro)
-- Tap the gear icon (Settings, top left of the Library), then tap "Go Pro".
-- Or open any piece (sample or saved), tap Export, then tap MIDI or MusicXML.
-- Or try to save a 4th piece (3 saved pieces are free).
+ORIGINAL WORK — NOT A TEMPLATE, NOT A RESKIN
+EarSheet was designed and written from scratch by its developer, in native Swift. It is not built from an app template, not a reskin or clone of any existing app, and not generated from an app-builder service. The interface, the real-time notation engraving, the SoundFont playback engine, and the transcription pipeline integration are all original work, developed and refined over months of iteration. The single third-party component is the transcription MODEL — adapted from Spotify's open-source "Basic Pitch" research model, used under its license and credited in the app — and a research model is not an app template: everything the user sees and touches was built for this app alone. The app has one focused purpose, no copied content, no keyword-stuffed metadata, and no advertising.
 
-The paywall offers 3 options, all in App Store Connect and included in this submission:
-- Pro Yearly (com.ragnus.pnge.pro.yearly), auto-renewable, $29.99/year, 1-week free trial for eligible new subscribers
-- Pro Monthly (com.ragnus.pnge.pro.monthly), auto-renewable, $4.99/month, 1-week free trial for eligible new subscribers
-- Lifetime Pro (com.ragnus.pnge.lifetime), non-consumable, $49.99 one-time purchase
-Prices are loaded from StoreKit and shown in the local currency. The trial wording only appears when StoreKit reports the account is eligible for the introductory offer. The paywall shows the auto-renewal terms and has Restore Purchases, Terms of Use (Apple standard EULA) and Privacy Policy links.
+WHY THIS APP IS NOT A DUPLICATE (GUIDELINE 4.3)
+This app turns SOUND into notation. The developer's other music app, Sheet Music Reader by SheetCam, does the inverse: it turns PHOTOGRAPHS of printed sheet music into playback (optical music recognition). The two apps share no code, no models, and no input method — one uses the microphone and an audio-transcription model, the other the camera and an image-recognition pipeline — and they serve different tasks: capturing music you hear or play vs. reading music printed on paper. Within the broader category, EarSheet's combination is distinct: real-time while-you-play transcription with a live engraved score (not only a piano roll), synchronized playback highlighting, and fully offline, on-device processing with no account.
 
-WHAT FREE AND PRO INCLUDE (as enforced in the app)
-Free: unlimited listening; piano roll and engraved page with playback; save up to 3 pieces; audio and video imports (only the first 30 seconds of a file are transcribed, and the app says so); PDF export of the first 30 seconds; MP3 and Photo export; tempo adjustment.
-Pro: unlimited saved pieces; audio and video imports up to 60 seconds (files longer than 60 seconds are not accepted on any plan); full-length PDF; MIDI and MusicXML export.
-
-SANDBOX PURCHASE AND RESTORE
-1. Sign in with a sandbox Apple Account (Settings > App Store > Sandbox Account on the device, or use a StoreKit-enabled build).
-2. Open the paywall as described above, pick a plan and tap the purchase button. Confirm with the sandbox account. Pro unlocks immediately: the lock icons on MIDI and MusicXML disappear, saves are unlimited, PDF is full length, and the Settings row now reads "AI Music Radar Pro" (once Pro is active it opens Manage Subscription instead of the paywall).
-3. Restore: with the same Apple Account, tap the gear icon (top left) > "Restore Purchases", or "Restore Purchases" on the paywall. An alert reports the result: "Pro is active on this Apple ID. Thanks for supporting AI Music Radar!" when a Pro purchase is found, or "No Pro purchase found on this Apple ID." when there is none.
-
-Contact: Yisheng Jiang, yisheng.jiang@gmail.com, +1 669 251 7789
+Thank you for your time. Questions: yisheng.jiang@gmail.com
